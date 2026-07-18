@@ -1,0 +1,164 @@
+import Foundation
+import XCTest
+@testable import QuotaPet
+
+@MainActor
+final class AppModelTests: XCTestCase {
+    func testLastGoodSnapshotBecomesStaleWhenProviderFails() async {
+        let provider = TestUsageProvider()
+        let model = AppModel(provider: provider, store: makeStore())
+        let ready = snapshot(used: 18, plan: "Plus", reset: date("2026-07-25T12:00:00Z"), state: .ready)
+
+        await model.start()
+        provider.emit(ready)
+        await drainMainActor()
+        provider.emit(QuotaSnapshot(planType: nil, windows: [], updatedAt: .now, state: .unavailable("连接中断")))
+        await drainMainActor()
+
+        XCTAssertEqual(model.snapshot.planType, "Plus")
+        XCTAssertEqual(model.snapshot.windows, ready.windows)
+        XCTAssertEqual(model.snapshot.updatedAt, ready.updatedAt)
+        XCTAssertEqual(model.snapshot.state, .stale("连接中断"))
+        XCTAssertEqual(model.lastError, "连接中断")
+    }
+
+    func testFirstFailureKeepsEmptyWindowsAndOriginalFailureState() async {
+        let provider = TestUsageProvider()
+        let model = AppModel(provider: provider, store: makeStore())
+
+        await model.start()
+        provider.emit(QuotaSnapshot(planType: nil, windows: [], updatedAt: .now, state: .incompatible("尚未确认 Codex")))
+        await drainMainActor()
+
+        XCTAssertTrue(model.snapshot.windows.isEmpty)
+        XCTAssertNil(model.snapshot.planType)
+        XCTAssertEqual(model.snapshot.state, .incompatible("尚未确认 Codex"))
+        XCTAssertEqual(model.lastError, "尚未确认 Codex")
+    }
+
+    func testReadySnapshotRecoversAfterStaleFailure() async {
+        let provider = TestUsageProvider()
+        let model = AppModel(provider: provider, store: makeStore())
+
+        await model.start()
+        provider.emit(snapshot(used: 18, plan: "Plus", reset: nil, state: .ready))
+        await drainMainActor()
+        provider.emit(QuotaSnapshot(planType: nil, windows: [], updatedAt: .now, state: .unavailable("连接中断")))
+        await drainMainActor()
+        let recovered = snapshot(used: 31, plan: "Pro", reset: nil, state: .ready)
+        provider.emit(recovered)
+        await drainMainActor()
+
+        XCTAssertEqual(model.snapshot, recovered)
+        XCTAssertNil(model.lastError)
+    }
+
+    func testModeSwitchRestartsProviderWithNewMode() async {
+        let provider = TestUsageProvider()
+        let model = AppModel(provider: provider, store: makeStore())
+
+        await model.start()
+        await model.setConnectionMode(.energySaver)
+
+        XCTAssertEqual(provider.startedModes, [.realtime, .energySaver])
+        XCTAssertEqual(model.connectionMode, .energySaver)
+    }
+
+    func testPreferencesPersistInAnIsolatedUserDefaultsSuite() async {
+        let store = makeStore()
+        let provider = TestUsageProvider()
+        let model = AppModel(provider: provider, store: store)
+
+        await model.setConnectionMode(.energySaver)
+        model.setPetVisible(false)
+        let restored = AppModel(provider: TestUsageProvider(), store: store)
+
+        XCTAssertEqual(restored.connectionMode, .energySaver)
+        XCTAssertFalse(restored.petVisible)
+    }
+
+    func testCompositionDoesNotStartRequiresConfirmationCandidate() async {
+        let factory = CompositionSessionFactory()
+        let composition = AppComposition(
+            resolver: CompositionResolver(resolution: .accepted(compositionCandidate(), trust: .requiresConfirmation)),
+            sessionFactory: factory,
+            store: makeStore()
+        )
+
+        await composition.model.start()
+        await drainMainActor()
+
+        XCTAssertEqual(factory.startCount, 0)
+        XCTAssertEqual(composition.model.snapshot.state, .unavailable("未找到已信任的 Codex 可执行文件"))
+    }
+
+    func testCompositionBuildsTrustedProviderWithInjectedFoundationFactory() {
+        let composition = AppComposition(
+            resolver: CompositionResolver(resolution: .accepted(compositionCandidate(), trust: .confirmed)),
+            sessionFactory: FoundationCodexAppServerSessionFactory(),
+            store: makeStore()
+        )
+
+        XCTAssertTrue(composition.provider is CodexAppServerStdioProvider)
+    }
+
+    private func makeStore() -> UserDefaults {
+        let suite = "QuotaPetTests.AppModel.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.removePersistentDomain(forName: suite)
+        return defaults
+    }
+}
+
+private final class TestUsageProvider: UsageProvider {
+    let snapshots: AsyncStream<QuotaSnapshot>
+    private let continuation: AsyncStream<QuotaSnapshot>.Continuation
+    private(set) var startedModes: [ConnectionMode] = []
+
+    init() {
+        var savedContinuation: AsyncStream<QuotaSnapshot>.Continuation?
+        snapshots = AsyncStream { savedContinuation = $0 }
+        continuation = savedContinuation!
+    }
+
+    func emit(_ snapshot: QuotaSnapshot) { continuation.yield(snapshot) }
+    func start(mode: ConnectionMode) async { startedModes.append(mode) }
+    func refresh() async {}
+    func stop() async {}
+}
+
+private func snapshot(used: Double, plan: String?, reset: Date?, state: ConnectionState) -> QuotaSnapshot {
+    QuotaSnapshot(
+        planType: plan,
+        windows: [QuotaWindow(id: "codex.primary", bucketID: "codex", displayName: "Codex", usedPercent: used, remainingPercent: 100 - used, windowDurationMinutes: 300, resetsAt: reset, isReached: used >= 100)],
+        updatedAt: date("2026-07-19T12:00:00Z"),
+        state: state
+    )
+}
+
+private func date(_ value: String) -> Date {
+    ISO8601DateFormatter().date(from: value)!
+}
+
+private func drainMainActor() async {
+    for _ in 0..<10 { await Task.yield() }
+}
+
+private final class CompositionResolver: AppExecutableResolving {
+    let resolution: ExecutableResolution
+    init(resolution: ExecutableResolution) { self.resolution = resolution }
+    func resolve(userSelectedURL: URL? = nil, path: String? = nil) -> [ExecutableResolution] { [resolution] }
+    func revalidate(_ candidate: ExecutableCandidate) -> Bool { true }
+}
+
+private final class CompositionSessionFactory: CodexAppServerSessionFactory {
+    private(set) var startCount = 0
+    func start(executableURL: URL, arguments: [String], onStandardOutput: @escaping (Data) -> Void, onStandardError: @escaping (Data) -> Void, onExit: @escaping () -> Void) throws -> any CodexAppServerSession {
+        startCount += 1
+        fatalError("requiresConfirmation candidates must never start")
+    }
+}
+
+private func compositionCandidate() -> ExecutableCandidate {
+    ExecutableCandidate(canonicalURL: URL(fileURLWithPath: "/trusted/codex"), source: .userSelected, ownerUID: 0, mode: 0o755, signingIdentifier: nil, teamIdentifier: nil, codeHash: "hash", deviceID: 1, inode: 1, inputURL: URL(fileURLWithPath: "/trusted/codex"))
+}
