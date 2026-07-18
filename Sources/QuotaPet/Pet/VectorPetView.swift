@@ -24,14 +24,70 @@ enum PetDrawingPlan {
     static let maximumPathCount = 9
     static let maximumGradientCount = 0
     static let bodyMaxDimension = 60
+    static let ringRadius: CGFloat = 28
+    static let ringLineWidth: CGFloat = 3
+
+    static func scale(in size: CGSize) -> CGFloat { min(size.width, size.height) / 72 }
+
+    static func center(in size: CGSize) -> CGPoint {
+        CGPoint(x: size.width / 2, y: size.height / 2)
+    }
+
+    static func ringBounds(in size: CGSize) -> CGRect {
+        let scale = scale(in: size)
+        let center = center(in: size)
+        let radius = ringRadius * scale
+        return CGRect(x: center.x - radius, y: center.y - radius, width: radius * 2, height: radius * 2)
+    }
+
+    static func renderedRingBounds(in size: CGSize) -> CGRect {
+        ringBounds(in: size).insetBy(dx: -ringLineWidth * scale(in: size) / 2, dy: -ringLineWidth * scale(in: size) / 2)
+    }
+}
+
+struct PetTailGeometry: Equatable {
+    let start: CGPoint
+    let control: CGPoint
+    let end: CGPoint
+    let strokeWidth: CGFloat
+
+    init(usedFraction: Double, canvasSize: CGSize) {
+        let scale = PetDrawingPlan.scale(in: canvasSize)
+        let center = PetDrawingPlan.center(in: canvasSize)
+        let angle = -CGFloat.pi / 2 + .pi * 2 * min(max(usedFraction, 0), 1)
+        let radial = CGPoint(x: cos(angle), y: sin(angle))
+        let tangent = CGPoint(x: -radial.y, y: radial.x)
+        let radius = PetDrawingPlan.ringRadius * scale
+
+        start = CGPoint(x: center.x + radial.x * radius, y: center.y + radial.y * radius)
+        control = CGPoint(
+            x: start.x + tangent.x * 5 * scale - radial.x * scale,
+            y: start.y + tangent.y * 5 * scale - radial.y * scale
+        )
+        end = CGPoint(
+            x: start.x + tangent.x * 8 * scale - radial.x * 4 * scale,
+            y: start.y + tangent.y * 8 * scale - radial.y * 4 * scale
+        )
+        strokeWidth = PetDrawingPlan.ringLineWidth * scale
+    }
+
+    var points: [CGPoint] { [start, control, end] }
+
+    var renderedBounds: CGRect {
+        let minX = points.map(\.x).min() ?? 0
+        let minY = points.map(\.y).min() ?? 0
+        let maxX = points.map(\.x).max() ?? 0
+        let maxY = points.map(\.y).max() ?? 0
+        return CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
+            .insetBy(dx: -strokeWidth / 2, dy: -strokeWidth / 2)
+    }
 }
 
 private enum PetCanvasDrawing {
     static func draw(_ state: PetRenderState, in context: inout GraphicsContext, size: CGSize) {
-        let scale = min(size.width, size.height) / 72
-        let center = CGPoint(x: size.width / 2, y: size.height / 2)
+        let scale = PetDrawingPlan.scale(in: size)
+        let center = PetDrawingPlan.center(in: size)
         let body = CGRect(x: center.x - 26 * scale, y: center.y - 22 * scale, width: 52 * scale, height: 48 * scale)
-        let ringRadius = 31 * scale
         let feature = Color.primary.opacity(0.86 * state.staleOpacity)
         let palette = state.palette
 
@@ -43,8 +99,9 @@ private enum PetCanvasDrawing {
         bodyPath.addEllipse(in: body)
         context.fill(bodyPath, with: .color(palette.bodyColor.opacity(state.staleOpacity)))
 
-        let ring = circle(center: center, radius: ringRadius)
-        let ringStyle = StrokeStyle(lineWidth: 3 * scale, lineCap: .round, dash: state.dashedRing ? [3 * scale, 2 * scale] : [])
+        var ring = Path()
+        ring.addEllipse(in: PetDrawingPlan.ringBounds(in: size))
+        let ringStyle = StrokeStyle(lineWidth: PetDrawingPlan.ringLineWidth * scale, lineCap: .round, dash: state.dashedRing ? [3 * scale, 2 * scale] : [])
         context.stroke(ring, with: .color(palette.ringColor.opacity(0.28 * state.staleOpacity)), style: ringStyle)
 
         let startAngle = -CGFloat.pi / 2
@@ -52,27 +109,18 @@ private enum PetCanvasDrawing {
         let endAngle = startAngle + .pi * 2 * used
         if used > 0 {
             var usedRing = Path()
-            usedRing.addArc(center: center, radius: ringRadius, startAngle: .radians(startAngle), endAngle: .radians(endAngle), clockwise: false)
-            context.stroke(usedRing, with: .color(palette.ringColor.opacity(state.staleOpacity)), style: StrokeStyle(lineWidth: 3 * scale, lineCap: .round))
+            usedRing.addArc(center: center, radius: PetDrawingPlan.ringRadius * scale, startAngle: .radians(startAngle), endAngle: .radians(endAngle), clockwise: false)
+            context.stroke(usedRing, with: .color(palette.ringColor.opacity(state.staleOpacity)), style: StrokeStyle(lineWidth: PetDrawingPlan.ringLineWidth * scale, lineCap: .round))
         }
-        drawTail(at: endAngle, center: center, radius: ringRadius, scale: scale, color: palette.ringColor.opacity(state.staleOpacity), in: &context)
+        drawTail(PetTailGeometry(usedFraction: used, canvasSize: size), color: palette.ringColor.opacity(state.staleOpacity), in: &context)
         drawFace(state, center: center, scale: scale, color: feature, in: &context)
     }
 
-    private static func circle(center: CGPoint, radius: CGFloat) -> Path {
-        var path = Path()
-        path.addEllipse(in: CGRect(x: center.x - radius, y: center.y - radius, width: radius * 2, height: radius * 2))
-        return path
-    }
-
-    private static func drawTail(at angle: CGFloat, center: CGPoint, radius: CGFloat, scale: CGFloat, color: Color, in context: inout GraphicsContext) {
-        let start = CGPoint(x: center.x + cos(angle) * radius, y: center.y + sin(angle) * radius)
-        let direction = CGPoint(x: cos(angle), y: sin(angle))
-        let end = CGPoint(x: start.x + direction.x * 6 * scale - 3 * scale, y: start.y + direction.y * 6 * scale + 5 * scale)
+    private static func drawTail(_ geometry: PetTailGeometry, color: Color, in context: inout GraphicsContext) {
         var tail = Path()
-        tail.move(to: start)
-        tail.addQuadCurve(to: end, control: CGPoint(x: start.x + direction.x * 7 * scale, y: start.y + direction.y * 2 * scale))
-        context.stroke(tail, with: .color(color), style: StrokeStyle(lineWidth: 3 * scale, lineCap: .round))
+        tail.move(to: geometry.start)
+        tail.addQuadCurve(to: geometry.end, control: geometry.control)
+        context.stroke(tail, with: .color(color), style: StrokeStyle(lineWidth: geometry.strokeWidth, lineCap: .round))
     }
 
     private static func drawFace(_ state: PetRenderState, center: CGPoint, scale: CGFloat, color: Color, in context: inout GraphicsContext) {

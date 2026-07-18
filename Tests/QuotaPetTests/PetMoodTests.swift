@@ -50,7 +50,7 @@ final class PetMoodTests: XCTestCase {
         XCTAssertEqual(state.usedFraction, 0.72)
         XCTAssertEqual(state.staleOpacity, 0.55)
         XCTAssertFalse(state.dashedRing)
-        XCTAssertEqual(state.accessibilityValue, "剩余 28%")
+        XCTAssertEqual(state.accessibilityValue, "剩余 28%，数据已过期")
     }
 
     func testAnimationOnlySchedulesBoundedOneShotEvents() {
@@ -59,16 +59,20 @@ final class PetMoodTests: XCTestCase {
 
             XCTAssertTrue(policy.animationEnabled)
             XCTAssertTrue((180...260).contains(policy.durationMilliseconds!))
-            XCTAssertNil(policy.idleBlinkIntervalSeconds)
+            XCTAssertNil(policy.idleBlinkDelayRangeSeconds)
+            XCTAssertNil(policy.nextIdleBlinkDelay(randomUnit: 0.5))
         }
     }
 
-    func testIdleBlinkIsRareAndShort() {
+    func testIdleBlinkIsOneShotWithInjectableNextDelayRange() {
         let policy = PetAnimationPolicy(event: .idleBlink, reduceMotion: false, petVisible: true, connectionMode: .realtime)
 
         XCTAssertTrue(policy.animationEnabled)
-        XCTAssertTrue((45...90).contains(policy.idleBlinkIntervalSeconds!))
-        XCTAssertLessThanOrEqual(policy.durationMilliseconds!, 160)
+        XCTAssertEqual(policy.durationMilliseconds, 140)
+        XCTAssertEqual(policy.idleBlinkDelayRangeSeconds, 45...90)
+        XCTAssertEqual(policy.nextIdleBlinkDelay(randomUnit: 0), 45)
+        XCTAssertEqual(policy.nextIdleBlinkDelay(randomUnit: 0.5), 68)
+        XCTAssertEqual(policy.nextIdleBlinkDelay(randomUnit: 1), 90)
     }
 
     func testAnimationIsDisabledForEveryGate() {
@@ -81,7 +85,8 @@ final class PetMoodTests: XCTestCase {
         for policy in blockedPolicies {
             XCTAssertFalse(policy.animationEnabled)
             XCTAssertNil(policy.durationMilliseconds)
-            XCTAssertNil(policy.idleBlinkIntervalSeconds)
+            XCTAssertNil(policy.idleBlinkDelayRangeSeconds)
+            XCTAssertNil(policy.nextIdleBlinkDelay(randomUnit: 0.5))
         }
     }
 }

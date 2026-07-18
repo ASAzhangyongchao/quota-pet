@@ -11,6 +11,23 @@ final class PetRenderContractTests: XCTestCase {
         XCTAssertEqual(PetRenderContract.emojiGlyphCount, 0)
     }
 
+    func testRingAndTailStayInsideSafeBoundsAtEveryQuarterTurn() {
+        for size in [CGFloat(72), 48] {
+            let canvasSize = CGSize(width: size, height: size)
+            let safeBounds = CGRect(x: 2, y: 2, width: size - 4, height: size - 4)
+
+            XCTAssertTrue(safeBounds.contains(PetDrawingPlan.renderedRingBounds(in: canvasSize)))
+            for usedFraction in [0.0, 0.25, 0.5, 0.75, 1.0] {
+                let tail = PetTailGeometry(usedFraction: usedFraction, canvasSize: canvasSize)
+
+                for point in tail.points {
+                    XCTAssertTrue(safeBounds.contains(point), "\(size)pt / \(usedFraction) tail point escaped: \(point)")
+                }
+                XCTAssertTrue(safeBounds.contains(tail.renderedBounds), "\(size)pt / \(usedFraction) tail bounds escaped: \(tail.renderedBounds)")
+            }
+        }
+    }
+
     func testMoodExpressionAndStatusSignalsAreSemantic() {
         let critical = PetRenderState(snapshot: renderSnapshot(remaining: 9, state: .ready))
         XCTAssertEqual(critical.eyeShape, .line)

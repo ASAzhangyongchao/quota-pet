@@ -92,7 +92,7 @@ public struct PetRenderState: Equatable {
                 usedFraction: Self.clamp(window.usedPercent) / 100,
                 dashedRing: false,
                 staleOpacity: isStale ? 0.55 : 1,
-                accessibilityValue: "剩余 \(Int(remaining.rounded()))%"
+                accessibilityValue: "剩余 \(Int(remaining.rounded()))%" + (isStale ? "，数据已过期" : "")
             )
         }
     }
@@ -178,13 +178,13 @@ public enum PetAnimationEvent: Equatable {
 public struct PetAnimationPolicy: Equatable {
     public let animationEnabled: Bool
     public let durationMilliseconds: Int?
-    public let idleBlinkIntervalSeconds: Int?
+    public let idleBlinkDelayRangeSeconds: ClosedRange<Int>?
 
     init(event: PetAnimationEvent, reduceMotion: Bool, petVisible: Bool, connectionMode: ConnectionMode) {
         guard !reduceMotion, petVisible, connectionMode != .energySaver else {
             animationEnabled = false
             durationMilliseconds = nil
-            idleBlinkIntervalSeconds = nil
+            idleBlinkDelayRangeSeconds = nil
             return
         }
 
@@ -192,17 +192,24 @@ public struct PetAnimationPolicy: Equatable {
         switch event {
         case .stateChange:
             durationMilliseconds = 220
-            idleBlinkIntervalSeconds = nil
+            idleBlinkDelayRangeSeconds = nil
         case .click:
             durationMilliseconds = 200
-            idleBlinkIntervalSeconds = nil
+            idleBlinkDelayRangeSeconds = nil
         case .hover:
             durationMilliseconds = 180
-            idleBlinkIntervalSeconds = nil
+            idleBlinkDelayRangeSeconds = nil
         case .idleBlink:
             durationMilliseconds = 140
-            idleBlinkIntervalSeconds = 60
+            idleBlinkDelayRangeSeconds = 45...90
         }
+    }
+
+    public func nextIdleBlinkDelay(randomUnit: Double) -> Int? {
+        guard let range = idleBlinkDelayRangeSeconds else { return nil }
+        let unit = min(max(randomUnit, 0), 1)
+        let offset = Int((Double(range.upperBound - range.lowerBound) * unit).rounded())
+        return range.lowerBound + offset
     }
 }
 
