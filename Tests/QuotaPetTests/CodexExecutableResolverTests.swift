@@ -96,6 +96,7 @@ final class CodexExecutableResolverTests: XCTestCase {
         XCTAssertTrue(resolver.confirm(first))
 
         XCTAssertEqual(resolver.inspect([input]).first?.trust, .confirmed)
+        XCTAssertTrue(resolver.revalidate(first))
     }
 
     func testHashChangeInvalidatesConfirmation() {
@@ -104,9 +105,11 @@ final class CodexExecutableResolverTests: XCTestCase {
         let resolver = CodexExecutableResolver(inspector: inspector)
         let first = try! XCTUnwrap(resolver.inspect([input]).first?.candidate)
         XCTAssertTrue(resolver.confirm(first))
+        XCTAssertTrue(resolver.revalidate(first))
         inspector.set(inspection(canonicalURL: URL(fileURLWithPath: "/safe/codex"), codeHash: "two"), for: input.url.path)
 
         XCTAssertTrue(resolver.inspect([input]).first?.requiresConfirmation == true)
+        XCTAssertFalse(resolver.revalidate(first))
     }
 
     func testSigningMetadataChangeInvalidatesConfirmation() {
@@ -136,24 +139,98 @@ final class CodexExecutableResolverTests: XCTestCase {
         let input = ExecutablePathInput(url: link, source: .userSelected)
         let first = try XCTUnwrap(resolver.inspect([input]).first?.candidate)
         XCTAssertTrue(resolver.confirm(first))
+        XCTAssertTrue(resolver.revalidate(first))
         try FileManager.default.removeItem(at: link)
         try FileManager.default.createSymbolicLink(at: link, withDestinationURL: secondTarget)
 
         XCTAssertTrue(resolver.inspect([input]).first?.requiresConfirmation == true)
+        XCTAssertFalse(resolver.revalidate(first))
     }
 
-    func testBundleAllowListRequiresValidSignatureIdentifierAndTeam() {
-        let input = ExecutablePathInput(url: URL(fileURLWithPath: "/bundle/codex"), source: .chatGPTBundle)
+    func testBundleAllowListRequiresRootOwnedFixedSystemSource() {
+        let input = ExecutablePathInput(
+            url: URL(fileURLWithPath: "/Applications/ChatGPT.app/Contents/Resources/codex"),
+            source: .chatGPTBundle
+        )
         let trusted = inspection(
-            canonicalURL: URL(fileURLWithPath: "/bundle/codex"),
+            canonicalURL: input.url,
             signingIdentifier: "com.openai.codex",
             teamIdentifier: "2DC432GLL2",
             signatureIsValid: true,
-            bundleIdentifier: "com.openai.codex"
+            bundleIdentifier: "com.openai.codex",
+            ownerUID: 0
         )
         let resolver = CodexExecutableResolver(inspector: FakeInspector([input.url.path: trusted]))
 
         XCTAssertEqual(resolver.inspect([input]).first?.trust, .bundleAllowList)
+    }
+
+    func testMatchingHomeBundleStillRequiresConfirmation() {
+        let input = ExecutablePathInput(
+            url: URL(fileURLWithPath: "/Users/tester/Applications/ChatGPT.app/Contents/Resources/codex"),
+            source: .homeChatGPTBundle
+        )
+        let matching = inspection(
+            canonicalURL: input.url,
+            signingIdentifier: "com.openai.codex",
+            teamIdentifier: "2DC432GLL2",
+            signatureIsValid: true,
+            bundleIdentifier: "com.openai.codex",
+            ownerUID: 0
+        )
+        let resolver = CodexExecutableResolver(inspector: FakeInspector([input.url.path: matching]))
+
+        XCTAssertTrue(resolver.inspect([input]).first?.requiresConfirmation == true)
+    }
+
+    func testBundleAllowListRejectsNonRootOwnerAndWrongSystemPath() {
+        let nonRootInput = ExecutablePathInput(
+            url: URL(fileURLWithPath: "/Applications/ChatGPT.app/Contents/Resources/codex"),
+            source: .chatGPTBundle
+        )
+        let wrongPathInput = ExecutablePathInput(
+            url: URL(fileURLWithPath: "/tmp/ChatGPT.app/Contents/Resources/codex"),
+            source: .chatGPTBundle
+        )
+        let matchingButNonRoot = inspection(
+            canonicalURL: nonRootInput.url,
+            signingIdentifier: "com.openai.codex",
+            teamIdentifier: "2DC432GLL2",
+            signatureIsValid: true,
+            bundleIdentifier: "com.openai.codex",
+            ownerUID: getuid()
+        )
+        let matchingWrongPath = inspection(
+            canonicalURL: wrongPathInput.url,
+            signingIdentifier: "com.openai.codex",
+            teamIdentifier: "2DC432GLL2",
+            signatureIsValid: true,
+            bundleIdentifier: "com.openai.codex",
+            ownerUID: 0
+        )
+        let resolver = CodexExecutableResolver(inspector: FakeInspector([
+            nonRootInput.url.path: matchingButNonRoot,
+            wrongPathInput.url.path: matchingWrongPath,
+        ]))
+
+        XCTAssertTrue(resolver.inspect([nonRootInput]).first?.requiresConfirmation == true)
+        XCTAssertTrue(resolver.inspect([wrongPathInput]).first?.requiresConfirmation == true)
+    }
+
+    func testRevalidateRejectsChangedDeviceOrInode() {
+        let input = ExecutablePathInput(url: URL(fileURLWithPath: "/safe/codex"), source: .userSelected)
+        let inspector = FakeInspector([input.url.path: inspection(
+            canonicalURL: input.url,
+            deviceID: 1,
+            inode: 1
+        )])
+        let resolver = CodexExecutableResolver(inspector: inspector)
+        let first = try! XCTUnwrap(resolver.inspect([input]).first?.candidate)
+        XCTAssertTrue(resolver.confirm(first))
+        XCTAssertTrue(resolver.revalidate(first))
+        inspector.set(inspection(canonicalURL: input.url, deviceID: 1, inode: 2), for: input.url.path)
+
+        XCTAssertFalse(resolver.revalidate(first))
     }
 
     func testBundleMismatchRequiresConfirmation() {
@@ -210,17 +287,23 @@ private func inspection(
     signingIdentifier: String? = nil,
     teamIdentifier: String? = nil,
     signatureIsValid: Bool = false,
-    bundleIdentifier: String? = nil
+    bundleIdentifier: String? = nil,
+    ownerUID: uid_t = getuid(),
+    deviceID: dev_t = 1,
+    inode: ino_t = 1
 ) -> StaticExecutableInspection {
     .init(
         candidate: .init(
             canonicalURL: canonicalURL,
             source: .userSelected,
-            ownerUID: getuid(),
+            ownerUID: ownerUID,
             mode: 0o755,
             signingIdentifier: signingIdentifier,
             teamIdentifier: teamIdentifier,
-            codeHash: codeHash
+            codeHash: codeHash,
+            deviceID: deviceID,
+            inode: inode,
+            inputURL: canonicalURL
         ),
         signatureIsValid: signatureIsValid,
         bundleIdentifier: bundleIdentifier

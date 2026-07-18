@@ -14,14 +14,6 @@ struct ExecutableCandidate: Equatable {
         case local
         case path
 
-        fileprivate var isBundle: Bool {
-            switch self {
-            case .chatGPTBundle, .codexBundle, .homeChatGPTBundle, .homeCodexBundle:
-                true
-            default:
-                false
-            }
-        }
     }
 
     let canonicalURL: URL
@@ -31,6 +23,9 @@ struct ExecutableCandidate: Equatable {
     let signingIdentifier: String?
     let teamIdentifier: String?
     let codeHash: String
+    let deviceID: dev_t
+    let inode: ino_t
+    let inputURL: URL
 }
 
 struct TrustFingerprint: Equatable, Hashable {
@@ -39,6 +34,8 @@ struct TrustFingerprint: Equatable, Hashable {
     let signingIdentifier: String?
     let teamIdentifier: String?
     let ownerUID: uid_t
+    let deviceID: dev_t
+    let inode: ino_t
 
     init(candidate: ExecutableCandidate) {
         canonicalPath = candidate.canonicalURL.path
@@ -46,6 +43,8 @@ struct TrustFingerprint: Equatable, Hashable {
         signingIdentifier = candidate.signingIdentifier
         teamIdentifier = candidate.teamIdentifier
         ownerUID = candidate.ownerUID
+        deviceID = candidate.deviceID
+        inode = candidate.inode
     }
 }
 
@@ -64,6 +63,7 @@ enum CodexExecutableInspectionError: Error, Equatable {
     case unsafeOwner
     case fileTooLarge
     case hashFailed
+    case identityChanged
 }
 
 struct StaticExecutableInspection: Equatable {
@@ -90,10 +90,54 @@ struct CodexStaticExecutableInspector: CodexExecutableInspecting {
             throw CodexExecutableInspectionError.realpathFailed
         }
         let canonicalURL = try canonicalURL(for: url)
-        var metadata = stat()
-        guard stat(canonicalURL.path, &metadata) == 0 else {
+        let descriptor = open(canonicalURL.path, O_RDONLY | O_CLOEXEC)
+        guard descriptor >= 0 else {
             throw CodexExecutableInspectionError.realpathFailed
         }
+        let handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
+        defer { try? handle.close() }
+        let metadata = try fileMetadata(for: descriptor)
+        try validate(metadata)
+        let codeHash = try hashFile(from: handle)
+        let afterHash = try fileMetadata(for: descriptor)
+        guard sameIdentity(metadata, afterHash), sameIdentity(metadata, try pathMetadata(for: canonicalURL)) else {
+            throw CodexExecutableInspectionError.identityChanged
+        }
+
+        let signingURL = signingURL(for: canonicalURL)
+        let signature = signingMetadata(for: signingURL)
+        guard sameIdentity(metadata, try fileMetadata(for: descriptor)),
+              sameIdentity(metadata, try pathMetadata(for: canonicalURL))
+        else {
+            throw CodexExecutableInspectionError.identityChanged
+        }
+        return StaticExecutableInspection(
+            candidate: ExecutableCandidate(
+                canonicalURL: canonicalURL,
+                source: source,
+                ownerUID: metadata.st_uid,
+                mode: metadata.st_mode,
+                signingIdentifier: signature.identifier,
+                teamIdentifier: signature.teamIdentifier,
+                codeHash: codeHash,
+                deviceID: metadata.st_dev,
+                inode: metadata.st_ino,
+                inputURL: url
+            ),
+            signatureIsValid: signature.isValid,
+            bundleIdentifier: signingURL.pathExtension == "app" ? Bundle(url: signingURL)?.bundleIdentifier : nil
+        )
+    }
+
+    private func canonicalURL(for url: URL) throws -> URL {
+        guard let resolvedPath = realpath(url.path, nil) else {
+            throw CodexExecutableInspectionError.realpathFailed
+        }
+        defer { free(resolvedPath) }
+        return URL(fileURLWithPath: String(cString: resolvedPath))
+    }
+
+    private func validate(_ metadata: stat) throws {
         guard (metadata.st_mode & S_IFMT) == S_IFREG else {
             throw CodexExecutableInspectionError.notRegularFile
         }
@@ -112,36 +156,34 @@ struct CodexStaticExecutableInspector: CodexExecutableInspecting {
         guard metadata.st_size >= 0, metadata.st_size <= off_t(Self.maximumFileBytes) else {
             throw CodexExecutableInspectionError.fileTooLarge
         }
-
-        let signingURL = signingURL(for: canonicalURL)
-        let signature = signingMetadata(for: signingURL)
-        return StaticExecutableInspection(
-            candidate: ExecutableCandidate(
-                canonicalURL: canonicalURL,
-                source: source,
-                ownerUID: metadata.st_uid,
-                mode: metadata.st_mode,
-                signingIdentifier: signature.identifier,
-                teamIdentifier: signature.teamIdentifier,
-                codeHash: try hashFile(at: canonicalURL)
-            ),
-            signatureIsValid: signature.isValid,
-            bundleIdentifier: signingURL.pathExtension == "app" ? Bundle(url: signingURL)?.bundleIdentifier : nil
-        )
     }
 
-    private func canonicalURL(for url: URL) throws -> URL {
-        guard let resolvedPath = realpath(url.path, nil) else {
-            throw CodexExecutableInspectionError.realpathFailed
+    private func fileMetadata(for descriptor: Int32) throws -> stat {
+        var metadata = stat()
+        guard fstat(descriptor, &metadata) == 0 else {
+            throw CodexExecutableInspectionError.identityChanged
         }
-        defer { free(resolvedPath) }
-        return URL(fileURLWithPath: String(cString: resolvedPath))
+        return metadata
     }
 
-    private func hashFile(at url: URL) throws -> String {
+    private func pathMetadata(for url: URL) throws -> stat {
+        var metadata = stat()
+        guard stat(url.path, &metadata) == 0 else {
+            throw CodexExecutableInspectionError.identityChanged
+        }
+        return metadata
+    }
+
+    private func sameIdentity(_ lhs: stat, _ rhs: stat) -> Bool {
+        lhs.st_dev == rhs.st_dev &&
+            lhs.st_ino == rhs.st_ino &&
+            lhs.st_size == rhs.st_size &&
+            lhs.st_mode == rhs.st_mode &&
+            lhs.st_uid == rhs.st_uid
+    }
+
+    private func hashFile(from handle: FileHandle) throws -> String {
         do {
-            let handle = try FileHandle(forReadingFrom: url)
-            defer { try? handle.close() }
             var hasher = SHA256()
             var totalBytes = 0
             while let data = try handle.read(upToCount: Self.hashChunkBytes), !data.isEmpty {
@@ -240,6 +282,8 @@ final class CodexExecutableResolver {
     private static let maximumPathComponentBytes = 4_096
     private static let allowedSigningIdentifier = "com.openai.codex"
     private static let allowedTeamIdentifier = "2DC432GLL2"
+    private static let chatGPTSystemPath = "/Applications/ChatGPT.app/Contents/Resources/codex"
+    private static let codexSystemPath = "/Applications/Codex.app/Contents/Resources/codex"
 
     private let inspector: any CodexExecutableInspecting
     private var eligibleFingerprints: Set<TrustFingerprint> = []
@@ -291,20 +335,7 @@ final class CodexExecutableResolver {
         var canonicalPaths = Set<String>()
         for input in inputs.prefix(Self.maximumPathEntries + 7) {
             do {
-                var inspection = try inspector.inspect(url: input.url, source: input.source)
-                inspection = StaticExecutableInspection(
-                    candidate: ExecutableCandidate(
-                        canonicalURL: inspection.candidate.canonicalURL,
-                        source: input.source,
-                        ownerUID: inspection.candidate.ownerUID,
-                        mode: inspection.candidate.mode,
-                        signingIdentifier: inspection.candidate.signingIdentifier,
-                        teamIdentifier: inspection.candidate.teamIdentifier,
-                        codeHash: inspection.candidate.codeHash
-                    ),
-                    signatureIsValid: inspection.signatureIsValid,
-                    bundleIdentifier: inspection.bundleIdentifier
-                )
+                let inspection = normalize(try inspector.inspect(url: input.url, source: input.source), input: input)
                 guard canonicalPaths.insert(inspection.candidate.canonicalURL.path).inserted else { continue }
                 let fingerprint = TrustFingerprint(candidate: inspection.candidate)
                 eligibleFingerprints.insert(fingerprint)
@@ -326,15 +357,60 @@ final class CodexExecutableResolver {
         return true
     }
 
+    func revalidate(_ candidate: ExecutableCandidate) -> Bool {
+        let input = ExecutablePathInput(url: candidate.inputURL, source: candidate.source)
+        do {
+            let inspection = normalize(try inspector.inspect(url: input.url, source: input.source), input: input)
+            guard inspection.candidate == candidate else { return false }
+            let fingerprint = TrustFingerprint(candidate: candidate)
+            return confirmedFingerprints.contains(fingerprint) || isAutomaticallyTrusted(inspection)
+        } catch {
+            return false
+        }
+    }
+
+    private func normalize(_ inspection: StaticExecutableInspection, input: ExecutablePathInput) -> StaticExecutableInspection {
+        StaticExecutableInspection(
+            candidate: ExecutableCandidate(
+                canonicalURL: inspection.candidate.canonicalURL,
+                source: input.source,
+                ownerUID: inspection.candidate.ownerUID,
+                mode: inspection.candidate.mode,
+                signingIdentifier: inspection.candidate.signingIdentifier,
+                teamIdentifier: inspection.candidate.teamIdentifier,
+                codeHash: inspection.candidate.codeHash,
+                deviceID: inspection.candidate.deviceID,
+                inode: inspection.candidate.inode,
+                inputURL: input.url
+            ),
+            signatureIsValid: inspection.signatureIsValid,
+            bundleIdentifier: inspection.bundleIdentifier
+        )
+    }
+
     private func trust(for inspection: StaticExecutableInspection, fingerprint: TrustFingerprint) -> ExecutableTrust {
-        if inspection.candidate.source.isBundle,
-           inspection.signatureIsValid,
-           inspection.bundleIdentifier == Self.allowedSigningIdentifier,
-           inspection.candidate.signingIdentifier == Self.allowedSigningIdentifier,
-           inspection.candidate.teamIdentifier == Self.allowedTeamIdentifier
-        {
+        if isAutomaticallyTrusted(inspection) {
             return .bundleAllowList
         }
         return confirmedFingerprints.contains(fingerprint) ? .confirmed : .requiresConfirmation
+    }
+
+    private func isAutomaticallyTrusted(_ inspection: StaticExecutableInspection) -> Bool {
+        let candidate = inspection.candidate
+        let expectedPath: String?
+        switch candidate.source {
+        case .chatGPTBundle:
+            expectedPath = Self.chatGPTSystemPath
+        case .codexBundle:
+            expectedPath = Self.codexSystemPath
+        default:
+            expectedPath = nil
+        }
+        return expectedPath == candidate.canonicalURL.path &&
+            candidate.ownerUID == 0 &&
+            inspection.signatureIsValid &&
+            inspection.bundleIdentifier == Self.allowedSigningIdentifier &&
+            inspection.candidate.signingIdentifier == Self.allowedSigningIdentifier &&
+            inspection.candidate.teamIdentifier == Self.allowedTeamIdentifier
     }
 }
