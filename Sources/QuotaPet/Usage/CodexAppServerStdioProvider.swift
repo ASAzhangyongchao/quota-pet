@@ -70,7 +70,8 @@ final class FoundationCodexAppServerSession: CodexAppServerSession, @unchecked S
     private let onStandardError: (Data) -> Void
     private let onExit: () -> Void
     private var inputClosed = false
-    private var exited = false
+    private var terminationQueued = false
+    private let ioQueue = DispatchQueue(label: "QuotaPet.CodexAppServerSession.io")
 
     init(process: Process, input: FileHandle, output: FileHandle, error: FileHandle, onStandardOutput: @escaping (Data) -> Void, onStandardError: @escaping (Data) -> Void, onExit: @escaping () -> Void) {
         self.process = process
@@ -83,8 +84,12 @@ final class FoundationCodexAppServerSession: CodexAppServerSession, @unchecked S
     }
 
     func installHandlers() {
-        output.readabilityHandler = { [weak self] handle in self?.read(handle, deliver: self?.onStandardOutput) }
-        error.readabilityHandler = { [weak self] handle in self?.read(handle, deliver: self?.onStandardError) }
+        output.readabilityHandler = { [weak self] handle in
+            self?.ioQueue.async { [weak self] in self?.readAvailable(handle, deliver: self?.onStandardOutput) }
+        }
+        error.readabilityHandler = { [weak self] handle in
+            self?.ioQueue.async { [weak self] in self?.readAvailable(handle, deliver: self?.onStandardError) }
+        }
         process.terminationHandler = { [weak self] _ in self?.finishExit() }
     }
 
@@ -111,7 +116,7 @@ final class FoundationCodexAppServerSession: CodexAppServerSession, @unchecked S
         if process.isRunning { kill(process.processIdentifier, SIGKILL) }
     }
 
-    private func read(_ handle: FileHandle, deliver: ((Data) -> Void)?) {
+    private func readAvailable(_ handle: FileHandle, deliver: ((Data) -> Void)?) {
         let data = handle.availableData
         guard !data.isEmpty else {
             handle.readabilityHandler = nil
@@ -121,18 +126,29 @@ final class FoundationCodexAppServerSession: CodexAppServerSession, @unchecked S
     }
 
     private func finishExit() {
-        let shouldNotify = lock.withLock { () -> Bool in
-            guard !exited else { return false }
-            exited = true
+        let shouldDrain = lock.withLock { () -> Bool in
+            guard !terminationQueued else { return false }
+            terminationQueued = true
             inputClosed = true
             return true
         }
-        guard shouldNotify else { return }
+        guard shouldDrain else { return }
+        ioQueue.async { [weak self] in self?.drainAndNotifyExit() }
+    }
+
+    private func drainAndNotifyExit() {
         output.readabilityHandler = nil
         error.readabilityHandler = nil
         process.terminationHandler = nil
+        deliver(output.readDataToEndOfFile(), to: onStandardOutput)
+        deliver(error.readDataToEndOfFile(), to: onStandardError)
         try? input.close()
         onExit()
+    }
+
+    private func deliver(_ data: Data, to callback: (Data) -> Void) {
+        guard !data.isEmpty else { return }
+        callback(data)
     }
 }
 
@@ -194,6 +210,7 @@ private actor UsageCoordinator {
     private var generation: UInt64 = 0
     private var connection: Connection?
     private var connecting = false
+    private var handshaking = false
     private var reading = false
     private var retryTask: (any UsageScheduledTask)?
     private var periodicTask: (any UsageScheduledTask)?
@@ -220,7 +237,7 @@ private actor UsageCoordinator {
     func refresh() async {
         guard mode != nil else { return }
         if let connection, mode == .realtime {
-            guard !reading else { return }
+            guard !handshaking, !reading else { return }
             reading = true
             Task { await self.readRateLimits(connection) }
         } else if !connecting {
@@ -273,15 +290,18 @@ private actor UsageCoordinator {
             let newConnection = Connection(generation: currentGeneration, session: session, client: client)
             connection = newConnection
             connecting = false
+            handshaking = true
             _ = try await client.request(method: "initialize", params: [
                 "clientInfo": ["name": "quota_pet", "title": "QuotaPet", "version": "0.1.0"],
             ])
             guard connection?.generation == currentGeneration else { return }
             try await client.sendInitialized(params: [:])
+            handshaking = false
             reading = true
             await readRateLimits(newConnection)
         } catch {
             connecting = false
+            handshaking = false
             fail(error, generation: currentGeneration)
         }
     }
@@ -322,6 +342,7 @@ private actor UsageCoordinator {
         cancelForceTask(for: generation)
         guard connection?.generation == generation else { return }
         connection = nil
+        handshaking = false
         reading = false
         publishState(.unavailable("Codex app-server exited"))
         scheduleRetry()
@@ -350,6 +371,7 @@ private actor UsageCoordinator {
             closeConnection()
         }
         connecting = false
+        handshaking = false
         reading = false
         let state: ConnectionState
         if let error = error as? CodexRPCClientError, error == .requestTimedOut {
@@ -392,6 +414,7 @@ private actor UsageCoordinator {
         generation += 1
         closeConnection()
         connecting = false
+        handshaking = false
         reading = false
     }
 

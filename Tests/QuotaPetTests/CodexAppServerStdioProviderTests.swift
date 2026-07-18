@@ -217,6 +217,40 @@ final class CodexAppServerStdioProviderTests: XCTestCase {
         XCTAssertEqual(factory.sessions.count, 3)
     }
 
+    func testRefreshDuringInitializeDoesNotSendRateLimitsReadEarly() async throws {
+        let factory = TestSessionFactory()
+        let provider = CodexAppServerStdioProvider(candidate: testCandidate(), resolver: TestResolver(isTrusted: true), sessionFactory: factory, scheduler: TestScheduler(), requestTimeout: 15)
+        await provider.start(mode: .realtime)
+        try await eventually("initialize request") { factory.session(at: 0)?.messages.count == 1 }
+        let session = try XCTUnwrap(factory.session(at: 0))
+
+        await provider.refresh()
+        await provider.refresh()
+        XCTAssertEqual(session.messages.count, 1)
+        session.reply(id: 1, result: [:])
+        try await eventually("post-handshake read") { session.messages.count >= 3 }
+        XCTAssertEqual(try session.method(at: 1), "initialized")
+        XCTAssertEqual(try session.method(at: 2), "account/rateLimits/read")
+    }
+
+    func testFoundationSessionDrainsImmediateStdoutBeforeSingleExitCallback() async throws {
+        let factory = FoundationCodexAppServerSessionFactory()
+        let events = LockedEvents()
+        let session = try factory.start(
+            executableURL: URL(fileURLWithPath: "/usr/bin/printf"),
+            arguments: ["final-jsonl"],
+            onStandardOutput: { events.append("stdout:\(String(decoding: $0, as: UTF8.self))") },
+            onStandardError: { events.append("stderr:\(String(decoding: $0, as: UTF8.self))") },
+            onExit: { events.append("exit") }
+        )
+
+        try await eventually("process exit") { events.values.contains("exit") }
+        XCTAssertEqual(events.values.filter { $0 == "exit" }.count, 1)
+        XCTAssertEqual(events.values.last, "exit")
+        XCTAssertTrue(events.values.contains("stdout:final-jsonl"))
+        withExtendedLifetime(session) {}
+    }
+
     private func completeHandshake(factory: TestSessionFactory, index: Int = 0, expectsTermination: Bool = false, response: [String: Any]? = nil) async throws -> TestSession {
         try await eventually("initialize request") { factory.session(at: index)?.messages.count == 1 }
         let session = try XCTUnwrap(factory.session(at: index))
@@ -325,6 +359,13 @@ private final class SnapshotRecorder: @unchecked Sendable {
     init(stream: AsyncStream<QuotaSnapshot>) {
         Task { for await value in stream { lock.withLock { storedValues.append(value) } } }
     }
+}
+
+private final class LockedEvents: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storedValues: [String] = []
+    var values: [String] { lock.withLock { storedValues } }
+    func append(_ value: String) { lock.withLock { storedValues.append(value) } }
 }
 
 private enum TestWaitError: Error { case timedOut }
