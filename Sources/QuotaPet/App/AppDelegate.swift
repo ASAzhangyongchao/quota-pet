@@ -4,6 +4,7 @@ import AppKit
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var composition: AppComposition?
     private var statusController: StatusItemController?
+    private var terminationCoordinator: TerminationCoordinator?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let composition = AppComposition()
@@ -13,12 +14,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             onSettings: { [weak self] in self?.showSettings() },
             onQuit: { [weak self] in self?.stopAndQuit() }
         )
+        terminationCoordinator = TerminationCoordinator { [weak model = composition.model] in
+            await model?.stop()
+        }
         Task { await composition.model.start() }
     }
 
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard let terminationCoordinator else { return .terminateNow }
+        return terminationCoordinator.requestTermination {
+            sender.reply(toApplicationShouldTerminate: true)
+        }
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
-        guard let model = composition?.model else { return }
-        Task { await model.stop() }
+        statusController = nil
     }
 
     private func showSettings() {
@@ -26,13 +36,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func stopAndQuit() {
-        guard let model = composition?.model else {
-            NSApp.terminate(nil)
-            return
-        }
-        Task {
-            await model.stop()
-            NSApp.terminate(nil)
-        }
+        NSApp.terminate(nil)
     }
 }
