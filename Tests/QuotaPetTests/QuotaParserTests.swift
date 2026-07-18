@@ -152,6 +152,29 @@ final class QuotaParserTests: XCTestCase {
         XCTAssertNotEqual(first.windows[0].id, first.windows[1].id)
     }
 
+    func testKeepsWindowIDStableWhenResetTimeChanges() throws {
+        let initial = try parse([
+            "rateLimitsByLimitId": [
+                "codex": [
+                    "primary": window(usedPercent: 10, durationMinutes: 300, resetsAt: 1_700_000_000),
+                    "secondary": window(usedPercent: 10, durationMinutes: 300, resetsAt: 1_700_000_000),
+                ],
+            ],
+        ])
+        let updated = try parse([
+            "rateLimitsByLimitId": [
+                "codex": [
+                    "primary": window(usedPercent: 10, durationMinutes: 300, resetsAt: 1_700_003_600),
+                    "secondary": window(usedPercent: 10, durationMinutes: 300, resetsAt: 1_700_007_200),
+                ],
+            ],
+        ])
+
+        XCTAssertEqual(initial.windows[0].id, updated.windows[0].id)
+        XCTAssertEqual(initial.windows[1].id, updated.windows[1].id)
+        XCTAssertNotEqual(updated.windows[0].id, updated.windows[1].id)
+    }
+
     func testBoundsBucketsAndExternalDisplayStrings() throws {
         var buckets: [String: Any] = [:]
         for index in 0..<130 {

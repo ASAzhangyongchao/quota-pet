@@ -80,9 +80,7 @@ enum QuotaParser {
         let resetsAt = number(in: object, keys: ["resetsAt", "resets_at"])
             .map(Date.init(timeIntervalSince1970:))
         let boundedRole = bound(role)
-        let resetComponent = resetsAt.map { String($0.timeIntervalSince1970) } ?? "none"
-        let durationComponent = windowDurationMinutes.map(String.init) ?? "none"
-        let id = "\(bucketID)|\(boundedRole)|\(durationComponent)|\(resetComponent)"
+        let id = "\(bucketID)|\(boundedRole)"
 
         return QuotaWindow(
             id: id,
