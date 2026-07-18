@@ -73,8 +73,18 @@ actor CodexRPCClient {
     }
 
     func receive(_ chunk: Data) throws {
+        var firstError: Error?
         for frame in try framer.append(chunk) {
-            try handle(frame)
+            do {
+                try handle(frame)
+            } catch {
+                if firstError == nil {
+                    firstError = error
+                }
+            }
+        }
+        if let firstError {
+            throw firstError
         }
     }
 

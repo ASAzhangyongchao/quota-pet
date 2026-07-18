@@ -133,6 +133,48 @@ final class CodexRPCClientTests: XCTestCase {
         }
     }
 
+    func testCompletesPendingResponseAfterMalformedFrameInSameChunk() async throws {
+        let transport = LockedMessages()
+        let client = CodexRPCClient(send: transport.send, requestTimeout: 0.02)
+        let response = Task {
+            try await client.request(method: "account/rateLimits/read")
+        }
+        try await waitForMessages(transport, count: 1)
+
+        var chunk = Data("not json\n".utf8)
+        chunk.append(try line(["id": 1, "result": ["ok": true]]))
+        do {
+            try await client.receive(chunk)
+            XCTFail("Expected invalid message failure")
+        } catch let error as CodexRPCClientError {
+            XCTAssertEqual(error, .invalidMessage)
+        }
+
+        let responseData = try await response.value
+        XCTAssertEqual(try JSONSerialization.jsonObject(with: responseData) as? [String: Bool], ["ok": true])
+    }
+
+    func testCompletesPendingResponseAfterInvalidObjectWithoutIDInSameChunk() async throws {
+        let transport = LockedMessages()
+        let client = CodexRPCClient(send: transport.send, requestTimeout: 0.02)
+        let response = Task {
+            try await client.request(method: "account/rateLimits/read")
+        }
+        try await waitForMessages(transport, count: 1)
+
+        var chunk = try line(["unexpected": true])
+        chunk.append(try line(["id": 1, "result": ["ok": true]]))
+        do {
+            try await client.receive(chunk)
+            XCTFail("Expected invalid message failure")
+        } catch let error as CodexRPCClientError {
+            XCTAssertEqual(error, .invalidMessage)
+        }
+
+        let responseData = try await response.value
+        XCTAssertEqual(try JSONSerialization.jsonObject(with: responseData) as? [String: Bool], ["ok": true])
+    }
+
     private func line(_ object: [String: Any]) throws -> Data {
         var data = try JSONSerialization.data(withJSONObject: object)
         data.append(0x0A)
