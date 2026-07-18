@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 
 protocol UsageExecutableResolving: AnyObject {
     func revalidate(_ candidate: ExecutableCandidate) -> Bool
@@ -23,8 +24,121 @@ protocol CodexAppServerSessionFactory: AnyObject {
     ) throws -> any CodexAppServerSession
 }
 
+enum CodexAppServerSessionError: Error {
+    case inputClosed
+}
+
+final class FoundationCodexAppServerSessionFactory: CodexAppServerSessionFactory {
+    func start(
+        executableURL: URL,
+        arguments: [String],
+        onStandardOutput: @escaping (Data) -> Void,
+        onStandardError: @escaping (Data) -> Void,
+        onExit: @escaping () -> Void
+    ) throws -> any CodexAppServerSession {
+        let process = Process()
+        process.executableURL = executableURL
+        process.arguments = arguments
+        let input = Pipe()
+        let output = Pipe()
+        let error = Pipe()
+        process.standardInput = input
+        process.standardOutput = output
+        process.standardError = error
+        let session = FoundationCodexAppServerSession(
+            process: process,
+            input: input.fileHandleForWriting,
+            output: output.fileHandleForReading,
+            error: error.fileHandleForReading,
+            onStandardOutput: onStandardOutput,
+            onStandardError: onStandardError,
+            onExit: onExit
+        )
+        session.installHandlers()
+        try process.run()
+        return session
+    }
+}
+
+final class FoundationCodexAppServerSession: CodexAppServerSession, @unchecked Sendable {
+    private let lock = NSLock()
+    private let process: Process
+    private let input: FileHandle
+    private let output: FileHandle
+    private let error: FileHandle
+    private let onStandardOutput: (Data) -> Void
+    private let onStandardError: (Data) -> Void
+    private let onExit: () -> Void
+    private var inputClosed = false
+    private var exited = false
+
+    init(process: Process, input: FileHandle, output: FileHandle, error: FileHandle, onStandardOutput: @escaping (Data) -> Void, onStandardError: @escaping (Data) -> Void, onExit: @escaping () -> Void) {
+        self.process = process
+        self.input = input
+        self.output = output
+        self.error = error
+        self.onStandardOutput = onStandardOutput
+        self.onStandardError = onStandardError
+        self.onExit = onExit
+    }
+
+    func installHandlers() {
+        output.readabilityHandler = { [weak self] handle in self?.read(handle, deliver: self?.onStandardOutput) }
+        error.readabilityHandler = { [weak self] handle in self?.read(handle, deliver: self?.onStandardError) }
+        process.terminationHandler = { [weak self] _ in self?.finishExit() }
+    }
+
+    func write(_ data: Data) throws {
+        try lock.withLock {
+            guard !inputClosed else { throw CodexAppServerSessionError.inputClosed }
+            try input.write(contentsOf: data)
+        }
+    }
+
+    func closeInput() {
+        lock.withLock {
+            guard !inputClosed else { return }
+            inputClosed = true
+            try? input.close()
+        }
+    }
+
+    func terminate() {
+        if process.isRunning { process.terminate() }
+    }
+
+    func forceTerminate() {
+        if process.isRunning { kill(process.processIdentifier, SIGKILL) }
+    }
+
+    private func read(_ handle: FileHandle, deliver: ((Data) -> Void)?) {
+        let data = handle.availableData
+        guard !data.isEmpty else {
+            handle.readabilityHandler = nil
+            return
+        }
+        deliver?(data)
+    }
+
+    private func finishExit() {
+        let shouldNotify = lock.withLock { () -> Bool in
+            guard !exited else { return false }
+            exited = true
+            inputClosed = true
+            return true
+        }
+        guard shouldNotify else { return }
+        output.readabilityHandler = nil
+        error.readabilityHandler = nil
+        process.terminationHandler = nil
+        try? input.close()
+        onExit()
+    }
+}
+
 final class CodexAppServerStdioProvider: UsageProvider {
     let snapshots: AsyncStream<QuotaSnapshot>
+    private let continuation: AsyncStream<QuotaSnapshot>.Continuation
     private let coordinator: UsageCoordinator
 
     init(
@@ -34,20 +148,25 @@ final class CodexAppServerStdioProvider: UsageProvider {
         scheduler: any UsageScheduling = DispatchUsageScheduler(),
         requestTimeout: TimeInterval = 15
     ) {
-        var continuation: AsyncStream<QuotaSnapshot>.Continuation?
-        snapshots = AsyncStream { continuation = $0 }
+        var savedContinuation: AsyncStream<QuotaSnapshot>.Continuation?
+        snapshots = AsyncStream { savedContinuation = $0 }
+        continuation = savedContinuation!
         coordinator = UsageCoordinator(
             candidate: candidate,
             resolver: resolver,
             sessionFactory: sessionFactory,
             scheduler: scheduler,
             requestTimeout: requestTimeout,
-            publish: { snapshot in continuation?.yield(snapshot) }
+            publish: { snapshot in savedContinuation?.yield(snapshot) }
         )
+        savedContinuation?.onTermination = { [weak coordinator] _ in
+            Task { await coordinator?.stop() }
+        }
     }
 
     deinit {
         let coordinator = coordinator
+        continuation.finish()
         Task { await coordinator.stop() }
     }
 
@@ -55,6 +174,7 @@ final class CodexAppServerStdioProvider: UsageProvider {
     func refresh() async { await coordinator.refresh() }
     func stop() async { await coordinator.stop() }
     func wake() async { await coordinator.refresh() }
+    func standardErrorTail() async -> Data { await coordinator.standardErrorTail() }
 }
 
 private actor UsageCoordinator {
@@ -77,7 +197,7 @@ private actor UsageCoordinator {
     private var reading = false
     private var retryTask: (any UsageScheduledTask)?
     private var periodicTask: (any UsageScheduledTask)?
-    private var terminationTask: (any UsageScheduledTask)?
+    private var forceTasks: [UInt64: any UsageScheduledTask] = [:]
     private var policy = RefreshPolicy()
 
     init(candidate: ExecutableCandidate, resolver: any UsageExecutableResolving, sessionFactory: any CodexAppServerSessionFactory, scheduler: any UsageScheduling, requestTimeout: TimeInterval, publish: @escaping (QuotaSnapshot) -> Void) {
@@ -112,10 +232,8 @@ private actor UsageCoordinator {
         mode = nil
         retryTask?.cancel()
         periodicTask?.cancel()
-        terminationTask?.cancel()
         retryTask = nil
         periodicTask = nil
-        terminationTask = nil
         stopCurrentConnection()
     }
 
@@ -185,7 +303,8 @@ private actor UsageCoordinator {
         do {
             try await connection.client.receive(data)
         } catch {
-            fail(error, generation: generation)
+            publishState(.unavailable("Codex app-server response was invalid"))
+            scheduleRetry()
         }
     }
 
@@ -200,6 +319,7 @@ private actor UsageCoordinator {
     }
 
     private func sessionExited(generation: UInt64) {
+        cancelForceTask(for: generation)
         guard connection?.generation == generation else { return }
         connection = nil
         reading = false
@@ -265,7 +385,7 @@ private actor UsageCoordinator {
     private func closeEnergyConnection(_ current: Connection) {
         guard connection?.generation == current.generation else { return }
         connection = nil
-        gracefullyTerminate(current.session)
+        gracefullyTerminate(current)
     }
 
     private func stopCurrentConnection() {
@@ -278,16 +398,25 @@ private actor UsageCoordinator {
     private func closeConnection() {
         guard let current = connection else { return }
         connection = nil
-        gracefullyTerminate(current.session)
+        gracefullyTerminate(current)
     }
 
-    private func gracefullyTerminate(_ session: any CodexAppServerSession) {
-        session.closeInput()
-        session.terminate()
-        terminationTask?.cancel()
-        terminationTask = scheduler.schedule(after: 1) { [weak session] in
+    private func gracefullyTerminate(_ connection: Connection) {
+        connection.session.closeInput()
+        connection.session.terminate()
+        let generation = connection.generation
+        forceTasks[generation] = scheduler.schedule(after: 1) { [weak session = connection.session] in
             session?.forceTerminate()
         }
+    }
+
+    private func cancelForceTask(for generation: UInt64) {
+        forceTasks.removeValue(forKey: generation)?.cancel()
+    }
+
+    func standardErrorTail() async -> Data {
+        guard let connection else { return Data() }
+        return await connection.client.standardErrorTail()
     }
 
     private func publishState(_ state: ConnectionState) {
