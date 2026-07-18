@@ -14,7 +14,7 @@ struct QuotaWindow: Equatable, Identifiable {
     let displayName: String
     let usedPercent: Double
     let remainingPercent: Double
-    let windowDurationMinutes: Int
+    let windowDurationMinutes: Int?
     let resetsAt: Date?
     let isReached: Bool
 }

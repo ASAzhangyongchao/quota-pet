@@ -38,6 +38,20 @@ final class QuotaParserTests: XCTestCase {
         XCTAssertEqual(snapshot.primary?.usedPercent, 41)
     }
 
+    func testFallsBackWhenRateLimitsByLimitIDHasNoValidWindows() throws {
+        let snapshot = try parse([
+            "rateLimitsByLimitId": ["codex": ["primary": ["used_percent": false]]],
+            "rateLimits": [
+                "codex": [
+                    "primary": window(usedPercent: 41, durationMinutes: 300, resetsAt: 1_700_000_000),
+                ],
+            ],
+        ])
+
+        XCTAssertEqual(snapshot.state, .ready)
+        XCTAssertEqual(snapshot.primary?.usedPercent, 41)
+    }
+
     func testSelectsCodexBucketBeforeMoreUsedNonCodexBuckets() throws {
         let snapshot = try parse([
             "rateLimitsByLimitId": [
@@ -82,7 +96,7 @@ final class QuotaParserTests: XCTestCase {
         XCTAssertThrowsError(try QuotaParser.parse(data: Data("not json".utf8)))
 
         let snapshot = try parse([
-            "rateLimitsByLimitId": ["codex": ["primary": ["used_percent": 50]]],
+            "rateLimitsByLimitId": ["codex": ["primary": ["window_duration_mins": 50]]],
         ])
 
         XCTAssertEqual(snapshot, QuotaSnapshot(
@@ -91,6 +105,34 @@ final class QuotaParserTests: XCTestCase {
             updatedAt: snapshot.updatedAt,
             state: .unavailable("未返回 Codex 用量窗口")
         ))
+    }
+
+    func testRejectsBooleanValuesForNumericQuotaFields() throws {
+        let unavailable = try parse([
+            "rateLimitsByLimitId": [
+                "codex": [
+                    "primary": ["used_percent": false, "window_duration_mins": 300],
+                ],
+            ],
+        ])
+        XCTAssertEqual(unavailable.state, .unavailable("未返回 Codex 用量窗口"))
+
+        let snapshot = try parse([
+            "rateLimitsByLimitId": [
+                "codex": [
+                    "primary": [
+                        "used_percent": 42,
+                        "window_duration_mins": true,
+                        "resets_at": false,
+                    ],
+                ],
+            ],
+        ])
+
+        XCTAssertEqual(snapshot.windows.count, 1)
+        XCTAssertEqual(snapshot.windows[0].usedPercent, 42)
+        XCTAssertNil(snapshot.windows[0].windowDurationMinutes)
+        XCTAssertNil(snapshot.windows[0].resetsAt)
     }
 
     func testGeneratesStableDistinctWindowIDs() throws {
@@ -118,6 +160,10 @@ final class QuotaParserTests: XCTestCase {
             ]
         }
         let longDisplayName = String(repeating: "👩🏽‍💻", count: 300)
+        let longBucketID = String(repeating: "b", count: 300)
+        buckets[longBucketID] = [
+            "primary": window(usedPercent: 49, durationMinutes: 60, resetsAt: 1_700_000_000),
+        ]
         buckets["codex"] = [
             "primary": [
                 "usedPercent": 50,
@@ -136,6 +182,7 @@ final class QuotaParserTests: XCTestCase {
         XCTAssertEqual(snapshot.primary?.bucketID, "codex")
         XCTAssertEqual(snapshot.planType?.unicodeScalars.count, 256)
         XCTAssertEqual(snapshot.primary?.displayName.unicodeScalars.count, 256)
+        XCTAssertTrue(snapshot.windows.contains { $0.bucketID.unicodeScalars.count == 256 })
     }
 
     private func parse(_ object: [String: Any]) throws -> QuotaSnapshot {
