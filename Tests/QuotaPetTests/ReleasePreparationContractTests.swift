@@ -17,6 +17,7 @@ final class ReleasePreparationContractTests: XCTestCase {
             "git diff --check", "test -s DEPENDENCIES.md", "swift test --disable-sandbox",
             "./scripts/build-app.sh", "./scripts/verify-package.sh",
             "QUOTAPET_CODEX_INTEGRATION: \"0\"",
+            "actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5",
         ] {
             XCTAssertTrue(workflow.contains(required), "Missing CI contract: \(required)")
         }
@@ -30,7 +31,11 @@ final class ReleasePreparationContractTests: XCTestCase {
         for required in [
             "tags:", "'v*.*.*'", "environment: release", "contents: write",
             "id-token: write", "attestations: write", "scripts/sign-and-notarize.sh",
-            "scripts/update-cask.sh", "anchore/sbom-action@v0", "actions/attest@v4",
+            "scripts/update-cask.sh",
+            "actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5",
+            "anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610",
+            "actions/attest@36051bcae73b7c2a8a6945a48cbf80953c6baa35",
+            "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02",
             "subject-checksums:", "subject-path:", "sbom-path:", "SHA256SUMS", "gh release create",
             "QuotaPet-${VERSION}.zip", "QuotaPet-${VERSION}.dmg",
         ] {
@@ -43,7 +48,10 @@ final class ReleasePreparationContractTests: XCTestCase {
         ] {
             XCTAssertTrue(workflow.contains("secrets.\(secret)"), "Missing release secret: \(secret)")
         }
-        XCTAssertGreaterThanOrEqual(workflow.components(separatedBy: "uses: actions/attest@v4").count - 1, 2)
+        XCTAssertGreaterThanOrEqual(
+            workflow.components(separatedBy: "uses: actions/attest@36051bcae73b7c2a8a6945a48cbf80953c6baa35").count - 1,
+            2
+        )
     }
 
     func testSigningScriptBuildsUniversalAndFailsClosed() throws {
