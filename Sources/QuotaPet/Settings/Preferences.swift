@@ -39,6 +39,7 @@ final class Preferences: ObservableObject {
         static let connectionMode = "QuotaPet.connectionMode"
         static let hotKey = "QuotaPet.hotKey"
         static let notificationsEnabled = "QuotaPet.notificationsEnabled"
+        static let launchAtLoginEnabled = "QuotaPet.launchAtLoginEnabled"
         static let position = "QuotaPet.normalizedPosition"
         static let fingerprints = "QuotaPet.confirmedFingerprints"
     }
@@ -51,6 +52,8 @@ final class Preferences: ObservableObject {
     @Published var hotKey: HotKeyShortcut { didSet { persist(hotKey, key: Key.hotKey) } }
     @Published private(set) var hotKeyStatusMessage: String?
     @Published var notificationsEnabled: Bool { didSet { store.set(notificationsEnabled, forKey: Key.notificationsEnabled) } }
+    @Published private(set) var launchAtLoginEnabled: Bool
+    @Published private(set) var launchAtLoginErrorMessage: String?
     @Published var normalizedPosition: NormalizedScreenPosition? { didSet { persist(normalizedPosition, key: Key.position) } }
     @Published var confirmedFingerprints: Set<TrustFingerprint> { didSet { persist(confirmedFingerprints, key: Key.fingerprints) } }
 
@@ -63,6 +66,8 @@ final class Preferences: ObservableObject {
         hotKey = Self.load(HotKeyShortcut.self, from: store, key: Key.hotKey) ?? .optionCommandU
         hotKeyStatusMessage = nil
         notificationsEnabled = store.object(forKey: Key.notificationsEnabled) as? Bool ?? false
+        launchAtLoginEnabled = store.object(forKey: Key.launchAtLoginEnabled) as? Bool ?? false
+        launchAtLoginErrorMessage = nil
         normalizedPosition = Self.load(NormalizedScreenPosition.self, from: store, key: Key.position)
         confirmedFingerprints = Self.load(Set<TrustFingerprint>.self, from: store, key: Key.fingerprints) ?? []
     }
@@ -73,6 +78,12 @@ final class Preferences: ObservableObject {
         case .failure(.occupied): hotKeyStatusMessage = "快捷键已被其他应用占用"
         case .failure: hotKeyStatusMessage = "快捷键注册失败，请使用菜单栏入口"
         }
+    }
+
+    func setLaunchAtLoginState(enabled: Bool, errorMessage: String?) {
+        launchAtLoginEnabled = enabled
+        launchAtLoginErrorMessage = errorMessage
+        store.set(enabled, forKey: Key.launchAtLoginEnabled)
     }
 
     private func persist<T: Encodable>(_ value: T?, key: String) {

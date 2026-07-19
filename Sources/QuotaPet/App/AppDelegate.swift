@@ -1,5 +1,29 @@
 import AppKit
 import Combine
+import Network
+
+struct LifecycleRecoveryPolicy {
+    private(set) var isSleeping = false
+    private var lastNetworkSatisfied: Bool?
+
+    mutating func willSleep() -> Bool {
+        guard !isSleeping else { return false }
+        isSleeping = true
+        return true
+    }
+
+    mutating func didWake() -> Bool {
+        guard isSleeping else { return false }
+        isSleeping = false
+        return true
+    }
+
+    mutating func networkChanged(isSatisfied: Bool) -> Bool {
+        defer { lastNetworkSatisfied = isSatisfied }
+        guard let previous = lastNetworkSatisfied else { return false }
+        return !previous && isSatisfied && !isSleeping
+    }
+}
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
@@ -10,8 +34,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var floatingPetController: FloatingPetController?
     private var settingsController: SettingsWindowController?
     private var globalHotKey: GlobalHotKey?
+    private var launchAtLogin: LaunchAtLogin?
+    private var localNotifications: LocalNotificationController?
+    private var notificationPolicy = NotificationPolicy()
+    private var notificationSubscription: AnyCancellable?
     private var preferenceSubscriptions = Set<AnyCancellable>()
-    private var restartTask: Task<Void, Never>?
+    private var providerTransitionTask: Task<Void, Never>?
+    private var recoveryQueued = false
+    private var recoveryPolicy = LifecycleRecoveryPolicy()
+    private var isTerminating = false
+    private var workspaceObservers: [NSObjectProtocol] = []
+    private var networkMonitor: NWPathMonitor?
+    private let networkQueue = DispatchQueue(label: "QuotaPet.NetworkRecovery", qos: .utility)
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let preferences = Preferences()
@@ -19,6 +53,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let composition = AppComposition(resolver: resolver)
         self.composition = composition
         self.preferences = preferences
+        let launchAtLogin = LaunchAtLogin()
+        self.launchAtLogin = launchAtLogin
+        preferences.setLaunchAtLoginState(enabled: launchAtLogin.isEnabled, errorMessage: nil)
+        localNotifications = LocalNotificationController()
         statusController = StatusItemController(
             model: composition.model,
             preferences: preferences,
@@ -31,17 +69,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let self, let resolver, resolver.confirm(candidate) else { return }
             preferences.confirmedFingerprints.insert(TrustFingerprint(candidate: candidate))
             self.restartProvider(resolver: resolver)
-        }, onRegisterHotKey: { [weak self] in self?.registerHotKey() })
+        }, onRegisterHotKey: { [weak self] in self?.registerHotKey() }, onSetLaunchAtLogin: { [weak self] enabled in
+            self?.setLaunchAtLogin(enabled)
+        })
         globalHotKey = GlobalHotKey { [weak self] in
             DispatchQueue.main.async { self?.floatingPetController?.showAndRecoverInteraction() }
         }
         registerHotKey()
-        preferences.$connectionMode.dropFirst().sink { [weak self] mode in Task { await self?.composition?.model.setConnectionMode(mode) } }.store(in: &preferenceSubscriptions)
+        preferences.$connectionMode.dropFirst().sink { [weak self] mode in self?.applyConnectionMode(mode) }.store(in: &preferenceSubscriptions)
         preferences.$hotKey.dropFirst().sink { [weak self] _ in self?.registerHotKey() }.store(in: &preferenceSubscriptions)
-        terminationCoordinator = TerminationCoordinator { [weak model = composition.model] in
-            await model?.stop()
-        }
-        Task { await composition.model.start() }
+        preferences.$notificationsEnabled.dropFirst().sink { [weak self] enabled in
+            if enabled { self?.localNotifications?.requestAuthorization() }
+        }.store(in: &preferenceSubscriptions)
+        subscribeToSnapshots(composition.model)
+        terminationCoordinator = makeTerminationCoordinator()
+        startLifecycleObservers()
+        enqueueProviderTransition { [weak model = composition.model] in await model?.start() }
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
@@ -52,8 +95,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        isTerminating = true
+        stopLifecycleObservers()
         globalHotKey?.invalidate()
-        restartTask?.cancel()
+        providerTransitionTask?.cancel()
+        notificationSubscription?.cancel()
         preferenceSubscriptions.removeAll()
         floatingPetController = nil
         settingsController = nil
@@ -69,8 +115,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func restartProvider(resolver: CodexExecutableResolver) {
-        restartTask?.cancel()
-        restartTask = Task { [weak self] in
+        enqueueProviderTransition { [weak self] in
             guard let self, let previous = self.composition else { return }
             await previous.model.stop()
             guard !Task.isCancelled, let preferences = self.preferences else { return }
@@ -78,13 +123,124 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.composition = replacement
             self.statusController = StatusItemController(model: replacement.model, preferences: preferences, onSettings: { [weak self] in self?.showSettings() }, onQuit: { [weak self] in self?.stopAndQuit() }, onRecoverInteraction: { [weak self] in self?.floatingPetController?.showAndRecoverInteraction() })
             self.floatingPetController = FloatingPetController(model: replacement.model, preferences: preferences)
-            self.terminationCoordinator = TerminationCoordinator { [weak model = replacement.model] in await model?.stop() }
-            await replacement.model.start()
+            self.subscribeToSnapshots(replacement.model)
+            self.terminationCoordinator = self.makeTerminationCoordinator()
+            if !self.isTerminating, !self.recoveryPolicy.isSleeping { await replacement.model.start() }
         }
     }
 
     private func registerHotKey() {
         guard let preferences else { return }
         preferences.setHotKeyRegistration(globalHotKey?.register(preferences.hotKey) ?? .failure(.registrationFailed))
+    }
+
+    private func applyConnectionMode(_ mode: ConnectionMode) {
+        enqueueProviderTransition { [weak self] in
+            guard let self, !self.isTerminating, !self.recoveryPolicy.isSleeping else { return }
+            await self.composition?.model.setConnectionMode(mode)
+        }
+    }
+
+    private func setLaunchAtLogin(_ enabled: Bool) {
+        guard let launchAtLogin, let preferences else { return }
+        let update = launchAtLogin.setEnabled(enabled)
+        preferences.setLaunchAtLoginState(enabled: update.isEnabled, errorMessage: update.errorMessage)
+    }
+
+    private func subscribeToSnapshots(_ model: AppModel) {
+        notificationSubscription?.cancel()
+        notificationSubscription = model.$snapshot.dropFirst().sink { [weak self] snapshot in
+            guard let self, self.preferences?.notificationsEnabled == true,
+                  let notification = self.notificationPolicy.evaluate(snapshot)
+            else { return }
+            self.localNotifications?.deliver(notification)
+        }
+    }
+
+    private func makeTerminationCoordinator() -> TerminationCoordinator {
+        TerminationCoordinator { [weak self] in
+            await self?.prepareForTermination()
+        }
+    }
+
+    private func prepareForTermination() async {
+        guard !isTerminating else { return }
+        isTerminating = true
+        stopLifecycleObservers()
+        recoveryQueued = false
+        await providerTransitionTask?.value
+        await composition?.model.stop()
+    }
+
+    private func enqueueProviderTransition(_ operation: @escaping @MainActor () async -> Void) {
+        let predecessor = providerTransitionTask
+        providerTransitionTask = Task {
+            await predecessor?.value
+            guard !Task.isCancelled else { return }
+            await operation()
+        }
+    }
+
+    private func startLifecycleObservers() {
+        let center = NSWorkspace.shared.notificationCenter
+        workspaceObservers = [
+            center.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: .main) { [weak self] _ in
+                Task { @MainActor in self?.handleSleep() }
+            },
+            center.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
+                Task { @MainActor in self?.handleWake() }
+            },
+        ]
+
+        let monitor = NWPathMonitor()
+        monitor.pathUpdateHandler = { [weak self] path in
+            Task { @MainActor in self?.handleNetworkChange(isSatisfied: path.status == .satisfied) }
+        }
+        networkMonitor = monitor
+        monitor.start(queue: networkQueue)
+    }
+
+    private func stopLifecycleObservers() {
+        let center = NSWorkspace.shared.notificationCenter
+        workspaceObservers.forEach(center.removeObserver)
+        workspaceObservers.removeAll()
+        networkMonitor?.pathUpdateHandler = nil
+        networkMonitor?.cancel()
+        networkMonitor = nil
+    }
+
+    private func handleSleep() {
+        guard !isTerminating, recoveryPolicy.willSleep() else { return }
+        enqueueProviderTransition { [weak self] in await self?.composition?.model.stop() }
+    }
+
+    private func handleWake() {
+        guard !isTerminating, recoveryPolicy.didWake() else { return }
+        queueRecovery()
+    }
+
+    private func handleNetworkChange(isSatisfied: Bool) {
+        guard !isTerminating else { return }
+        if recoveryPolicy.networkChanged(isSatisfied: isSatisfied) { queueRecovery() }
+    }
+
+    private func queueRecovery() {
+        guard !recoveryQueued, !isTerminating else { return }
+        recoveryQueued = true
+        enqueueProviderTransition { [weak self] in
+            guard let self else { return }
+            defer { self.recoveryQueued = false }
+            guard !self.isTerminating, !self.recoveryPolicy.isSleeping else { return }
+            let model = self.composition?.model
+            if let mode = self.preferences?.connectionMode {
+                await model?.setConnectionMode(mode)
+            }
+            await model?.start()
+            guard !self.isTerminating, !self.recoveryPolicy.isSleeping else {
+                await model?.stop()
+                return
+            }
+            await model?.refresh()
+        }
     }
 }

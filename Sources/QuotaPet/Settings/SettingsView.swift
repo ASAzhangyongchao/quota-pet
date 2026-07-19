@@ -3,12 +3,12 @@ import SwiftUI
 
 @MainActor
 final class SettingsWindowController: NSWindowController {
-    init(preferences: Preferences, candidates: @escaping () -> [ExecutableResolution], onConfirm: @escaping (ExecutableCandidate) -> Void, onRegisterHotKey: @escaping () -> Void) {
-        let view = SettingsView(preferences: preferences, candidates: candidates, onConfirm: onConfirm, onRegisterHotKey: onRegisterHotKey)
+    init(preferences: Preferences, candidates: @escaping () -> [ExecutableResolution], onConfirm: @escaping (ExecutableCandidate) -> Void, onRegisterHotKey: @escaping () -> Void, onSetLaunchAtLogin: @escaping (Bool) -> Void) {
+        let view = SettingsView(preferences: preferences, candidates: candidates, onConfirm: onConfirm, onRegisterHotKey: onRegisterHotKey, onSetLaunchAtLogin: onSetLaunchAtLogin)
         let hosting = NSHostingController(rootView: view)
         let window = NSWindow(contentViewController: hosting)
         window.title = "QuotaPet 设置"
-        window.setContentSize(NSSize(width: 420, height: 330))
+        window.setContentSize(NSSize(width: 420, height: 370))
         super.init(window: window)
     }
     required init?(coder: NSCoder) { nil }
@@ -20,6 +20,7 @@ private struct SettingsView: View {
     let candidates: () -> [ExecutableResolution]
     let onConfirm: (ExecutableCandidate) -> Void
     let onRegisterHotKey: () -> Void
+    let onSetLaunchAtLogin: (Bool) -> Void
     var body: some View {
         Form {
             Toggle("显示桌宠", isOn: $preferences.petVisible)
@@ -28,7 +29,14 @@ private struct SettingsView: View {
             Picker("连接模式", selection: $preferences.connectionMode) { Text("实时").tag(ConnectionMode.realtime); Text("节能").tag(ConnectionMode.energySaver) }.pickerStyle(.segmented)
             HStack { Text("快捷键：⌥⌘U"); if let message = preferences.hotKeyStatusMessage { Text(message).foregroundStyle(.red) } }
             Button("恢复默认⌥⌘U并重新注册") { preferences.hotKey = .optionCommandU; onRegisterHotKey() }
-            Toggle("通知（仅保存，尚不请求权限）", isOn: $preferences.notificationsEnabled)
+            Toggle("本地用量通知", isOn: $preferences.notificationsEnabled)
+            Toggle("登录时启动", isOn: Binding(
+                get: { preferences.launchAtLoginEnabled },
+                set: onSetLaunchAtLogin
+            ))
+            if let message = preferences.launchAtLoginErrorMessage {
+                Text(message).font(.caption).foregroundStyle(.red)
+            }
             Section("Codex 信任") {
                 ForEach(Array(candidates().enumerated()), id: \.offset) { _, resolution in
                     VStack(alignment: .leading) {

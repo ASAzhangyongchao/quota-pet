@@ -14,6 +14,7 @@ final class PreferencesTests: XCTestCase {
         XCTAssertEqual(preferences.connectionMode, .realtime)
         XCTAssertEqual(preferences.hotKey, .optionCommandU)
         XCTAssertFalse(preferences.notificationsEnabled)
+        XCTAssertFalse(preferences.launchAtLoginEnabled)
 
         preferences.petVisible = false
         preferences.normalizedPosition = NormalizedScreenPosition(x: 1.4, y: -0.2, screenIdentifier: "display")
