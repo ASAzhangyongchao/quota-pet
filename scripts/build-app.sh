@@ -41,6 +41,7 @@ run_test_hook() {
         "fail:$point") return 97 ;;
         "int:$point") kill -INT "$$" ;;
         "term:$point") kill -TERM "$$" ;;
+        "kill:$point") kill -KILL "$$" ;;
     esac
 }
 
@@ -98,11 +99,32 @@ validate_transaction_dir() {
     [[ "$canonical" == "$transaction" && "$canonical" == "$DIST_DIR"/.transaction-* ]]
 }
 
+discard_committed_transaction() {
+    local transaction="$1"
+    validate_transaction_dir "$transaction" || return 1
+    rm -rf -- \
+        "$transaction/QuotaPet.previous.app" "$transaction/QuotaPet.new.app" \
+        "$transaction/QuotaPet.previous.zip" "$transaction/QuotaPet.new.zip"
+    rm -f -- \
+        "$transaction/original-app-present" "$transaction/original-zip-present" \
+        "$transaction/app-install-intent" "$transaction/zip-install-intent" \
+        "$transaction/owner-pid"
+    # Remove this last: while it exists, interrupted cleanup remains metadata-only.
+    rm -f -- "$transaction/committed"
+    safe_remove_temporary "$transaction"
+}
+
 recover_orphaned_transactions() {
     local transaction owner
     for transaction in "$DIST_DIR"/.transaction-*; do
         [[ -d "$transaction" ]] || continue
         validate_transaction_dir "$transaction" || { echo "Refusing unsafe packaging transaction: $transaction" >&2; return 1; }
+        if [[ -e "$transaction/committed" ]]; then
+            TRANSACTION_DIR="$transaction"
+            discard_committed_transaction "$transaction"
+            TRANSACTION_DIR=""
+            continue
+        fi
         owner="$(sed -n '1p' "$transaction/owner-pid" 2>/dev/null || true)"
         if [[ "$owner" =~ ^[0-9]+$ && "$owner" != "$$" ]] && kill -0 "$owner" 2>/dev/null; then
             echo "Another QuotaPet packaging transaction is active." >&2
@@ -123,7 +145,15 @@ cleanup() {
         validate_transaction_dir "$TRANSACTION_DIR" || rollback_ok=0
     fi
     if [[ "$status" -ne 0 && "$rollback_ok" -eq 1 && -d "$TRANSACTION_DIR" ]]; then
-        rollback_transaction "$TRANSACTION_DIR" || rollback_ok=0
+        if [[ -e "$TRANSACTION_DIR/committed" ]]; then
+            if discard_committed_transaction "$TRANSACTION_DIR"; then
+                TRANSACTION_DIR=""
+            else
+                rollback_ok=0
+            fi
+        else
+            rollback_transaction "$TRANSACTION_DIR" || rollback_ok=0
+        fi
     fi
     safe_remove_temporary "$STAGING_DIR" || true
     if [[ "$rollback_ok" -eq 1 ]]; then
@@ -192,7 +222,15 @@ touch "$TRANSACTION_DIR/zip-install-intent"
 mv -- "$NEW_ZIP" "$FINAL_ZIP"
 run_test_hook after_new_zip
 
-safe_remove_temporary "$TRANSACTION_DIR"
+if [[ "$TEST_MODE" != "1" ]]; then
+    codesign --verify --deep --strict "$FINAL_APP"
+    unzip -tq "$FINAL_ZIP" >/dev/null
+fi
+COMMIT_MARKER_TMP="$TRANSACTION_DIR/.committed.$$"
+: >"$COMMIT_MARKER_TMP"
+mv -- "$COMMIT_MARKER_TMP" "$TRANSACTION_DIR/committed"
+run_test_hook after_commit_marker_before_cleanup
+discard_committed_transaction "$TRANSACTION_DIR"
 TRANSACTION_DIR=""
 
 echo "Built $FINAL_APP"

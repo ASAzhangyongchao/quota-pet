@@ -42,6 +42,7 @@ run_test_hook() {
         "fail:$point") return 97 ;;
         "int:$point") kill -INT "$$" ;;
         "term:$point") kill -TERM "$$" ;;
+        "kill:$point") kill -KILL "$$" ;;
     esac
 }
 
@@ -85,11 +86,27 @@ validate_transaction_dir() {
     [[ "$canonical" == "$transaction" && "$canonical" == "$APPLICATIONS_DIR"/.QuotaPet.install.* ]]
 }
 
+discard_committed_transaction() {
+    local transaction="$1"
+    validate_transaction_dir "$transaction" || return 1
+    rm -rf -- "$transaction/QuotaPet.previous.app" "$transaction/QuotaPet.new.app"
+    rm -f -- "$transaction/original-app-present" "$transaction/app-install-intent" "$transaction/owner-pid"
+    # Remove this last: while it exists, interrupted cleanup remains metadata-only.
+    rm -f -- "$transaction/committed"
+    safe_remove_transaction "$transaction"
+}
+
 recover_orphaned_transactions() {
     local transaction owner
     for transaction in "$APPLICATIONS_DIR"/.QuotaPet.install.*; do
         [[ -d "$transaction" ]] || continue
         validate_transaction_dir "$transaction" || { echo "Refusing unsafe install transaction: $transaction" >&2; return 1; }
+        if [[ -e "$transaction/committed" ]]; then
+            TRANSACTION_DIR="$transaction"
+            discard_committed_transaction "$transaction"
+            TRANSACTION_DIR=""
+            continue
+        fi
         owner="$(sed -n '1p' "$transaction/owner-pid" 2>/dev/null || true)"
         if [[ "$owner" =~ ^[0-9]+$ && "$owner" != "$$" ]] && kill -0 "$owner" 2>/dev/null; then
             echo "Another QuotaPet install transaction is active." >&2
@@ -110,7 +127,15 @@ cleanup() {
         validate_transaction_dir "$TRANSACTION_DIR" || rollback_ok=0
     fi
     if [[ "$status" -ne 0 && "$rollback_ok" -eq 1 && -d "$TRANSACTION_DIR" ]]; then
-        rollback_transaction "$TRANSACTION_DIR" || rollback_ok=0
+        if [[ -e "$TRANSACTION_DIR/committed" ]]; then
+            if discard_committed_transaction "$TRANSACTION_DIR"; then
+                TRANSACTION_DIR=""
+            else
+                rollback_ok=0
+            fi
+        else
+            rollback_transaction "$TRANSACTION_DIR" || rollback_ok=0
+        fi
     fi
     if [[ "$rollback_ok" -eq 1 ]]; then
         safe_remove_transaction "$TRANSACTION_DIR" || true
@@ -197,7 +222,11 @@ if [[ "$TEST_MODE" != "1" ]]; then
     }
 fi
 
-safe_remove_transaction "$TRANSACTION_DIR"
+COMMIT_MARKER_TMP="$TRANSACTION_DIR/.committed.$$"
+: >"$COMMIT_MARKER_TMP"
+mv -- "$COMMIT_MARKER_TMP" "$TRANSACTION_DIR/committed"
+run_test_hook after_commit_marker_before_cleanup
+discard_committed_transaction "$TRANSACTION_DIR"
 TRANSACTION_DIR=""
 
 echo "Installed $TARGET_APP"

@@ -105,6 +105,39 @@ final class PackagingContractTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: fixture.installedApplicationURL.path))
     }
 
+    func testBuildCommittedTransactionSurvivesKillAndRepeatedRecovery() throws {
+        guard try scriptsExposeSafeTransactionHarness() else { return }
+        let fixture = try TransactionFixture(hasOldApplication: false, hasOldZip: false)
+
+        XCTAssertEqual(try runScript("build-app.sh", fixture: fixture, hook: "kill:after_commit_marker_before_cleanup"), 9)
+        for _ in 0..<2 {
+            XCTAssertEqual(try runScript("build-app.sh", fixture: fixture, hook: "fail:before_backup_zip"), 97)
+        }
+
+        XCTAssertEqual(try fixture.applicationVersion(), "new-app")
+        XCTAssertEqual(try fixture.zipVersion(), "new-zip")
+    }
+
+    func testBuildCommittedPartialMetadataNeverRestoresOnlyOneBackup() throws {
+        guard try scriptsExposeSafeTransactionHarness() else { return }
+        let fixture = try TransactionFixture(hasOldApplication: true, hasOldZip: true)
+        try fixture.setBuildFinal(application: "committed-app", zip: "committed-zip")
+        try fixture.prepareCommittedBuildTransactionWithOnlyApplicationBackup()
+
+        XCTAssertEqual(try runScript("build-app.sh", fixture: fixture, hook: "fail:before_backup_app"), 97)
+        XCTAssertEqual(try fixture.applicationVersion(), "committed-app")
+        XCTAssertEqual(try fixture.zipVersion(), "committed-zip")
+    }
+
+    func testInstallerCommittedTransactionSurvivesKillAndRecovery() throws {
+        guard try scriptsExposeSafeTransactionHarness() else { return }
+        let fixture = try TransactionFixture(hasOldApplication: true, hasOldZip: true)
+
+        XCTAssertEqual(try runScript("install-local.sh", fixture: fixture, hook: "kill:after_commit_marker_before_cleanup"), 9)
+        XCTAssertEqual(try runScript("install-local.sh", fixture: fixture, hook: "fail:before_backup_app"), 97)
+        XCTAssertEqual(try fixture.installedApplicationVersion(), "new-app")
+    }
+
     func testPublicFilesDoNotContainPrivateWorkspacePaths() throws {
         let publicFiles = [
             "README.md", "AGENTS.md", "PRIVACY.md", "SECURITY.md",
@@ -208,6 +241,19 @@ private final class TransactionFixture {
 
     func zipVersion() throws -> String {
         try readVersion(at: root.appendingPathComponent("dist/QuotaPet.zip"))
+    }
+
+    func setBuildFinal(application: String, zip: String) throws {
+        try writeVersion(application, at: root.appendingPathComponent("dist/QuotaPet.app/version"))
+        try writeVersion(zip, at: root.appendingPathComponent("dist/QuotaPet.zip"))
+    }
+
+    func prepareCommittedBuildTransactionWithOnlyApplicationBackup() throws {
+        let transaction = root.appendingPathComponent("dist/.transaction-committed-partial", isDirectory: true)
+        try writeVersion("old-app", at: transaction.appendingPathComponent("QuotaPet.previous.app/version"))
+        for marker in ["committed", "original-app-present", "original-zip-present", "app-install-intent", "zip-install-intent"] {
+            try writeVersion("", at: transaction.appendingPathComponent(marker))
+        }
     }
 
     private func writeVersion(_ value: String, at url: URL) throws {
