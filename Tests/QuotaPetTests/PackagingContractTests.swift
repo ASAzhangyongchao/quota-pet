@@ -66,9 +66,43 @@ final class PackagingContractTests: XCTestCase {
 
     func testInstallerTracksNewMoveForRollbackWithoutPreviousApplication() throws {
         let script = try contents(of: "scripts/install-local.sh")
-        XCTAssertTrue(script.contains("NEW_MOVED=0"))
-        XCTAssertTrue(script.contains("NEW_MOVED=1"))
-        XCTAssertTrue(script.contains("\"$status\" -ne 0 && \"$NEW_MOVED\" -eq 1"))
+        XCTAssertTrue(script.contains("original-app-present"))
+        XCTAssertTrue(script.contains("QuotaPet.previous.app"))
+        XCTAssertTrue(script.contains("trap 'exit 130' INT"))
+        XCTAssertTrue(script.contains("trap 'exit 143' TERM"))
+    }
+
+    func testBuildBackupFailureAndPartialReplacementRestoreMatchingOldPair() throws {
+        guard try scriptsExposeSafeTransactionHarness() else { return }
+        for hook in [
+            "fail:before_backup_app", "fail:after_backup_app",
+            "fail:before_backup_zip", "fail:after_backup_zip",
+            "fail:after_new_app", "fail:after_new_zip",
+        ] {
+            let fixture = try TransactionFixture(hasOldApplication: true, hasOldZip: true)
+            let result = try runScript("build-app.sh", fixture: fixture, hook: hook)
+            XCTAssertEqual(result, 97, "Hook should preserve injected failure status: \(hook)")
+            XCTAssertEqual(try fixture.applicationVersion(), "old-app", hook)
+            XCTAssertEqual(try fixture.zipVersion(), "old-zip", hook)
+        }
+    }
+
+    func testInstallerSignalsAfterOldAndNewMoveRestoreOldApplication() throws {
+        guard try scriptsExposeSafeTransactionHarness() else { return }
+        for (hook, expectedStatus): (String, Int32) in [("int:after_backup_app", 130), ("term:after_new_app", 143)] {
+            let fixture = try TransactionFixture(hasOldApplication: true, hasOldZip: true)
+            let result = try runScript("install-local.sh", fixture: fixture, hook: hook)
+            XCTAssertEqual(result, expectedStatus, "Hook should preserve signal exit status: \(hook)")
+            XCTAssertEqual(try fixture.installedApplicationVersion(), "old-app", hook)
+        }
+    }
+
+    func testInstallerFailureAfterNewMoveLeavesNoApplicationWhenNoneExisted() throws {
+        guard try scriptsExposeSafeTransactionHarness() else { return }
+        let fixture = try TransactionFixture(hasOldApplication: false, hasOldZip: true)
+        let result = try runScript("install-local.sh", fixture: fixture, hook: "fail:after_new_app")
+        XCTAssertEqual(result, 97)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fixture.installedApplicationURL.path))
     }
 
     func testPublicFilesDoNotContainPrivateWorkspacePaths() throws {
@@ -112,5 +146,76 @@ final class PackagingContractTests: XCTestCase {
             contentsOf: repositoryRoot.appendingPathComponent(path),
             encoding: .utf8
         )
+    }
+
+    private func scriptsExposeSafeTransactionHarness() throws -> Bool {
+        let scripts = try ["scripts/build-app.sh", "scripts/install-local.sh"].map(contents(of:))
+        guard scripts.allSatisfy({ $0.contains("QUOTAPET_TEST_MODE") && $0.contains("run_test_hook") }) else {
+            XCTFail("Transaction scripts must expose the temporary-directory-only failure harness")
+            return false
+        }
+        return true
+    }
+
+    private func runScript(_ name: String, fixture: TransactionFixture, hook: String) throws -> Int32 {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/bash")
+        process.arguments = [repositoryRoot.appendingPathComponent("scripts/\(name)").path]
+        var environment = ProcessInfo.processInfo.environment
+        environment["QUOTAPET_TEST_MODE"] = "1"
+        environment["QUOTAPET_TEST_ROOT"] = fixture.root.path
+        environment["QUOTAPET_TEST_HOOK"] = hook
+        process.environment = environment
+        process.standardOutput = Pipe()
+        process.standardError = Pipe()
+        try process.run()
+        process.waitUntilExit()
+        return process.terminationStatus
+    }
+}
+
+private final class TransactionFixture {
+    let root: URL
+    let installedApplicationURL: URL
+
+    init(hasOldApplication: Bool, hasOldZip: Bool) throws {
+        root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("QuotaPet-transaction-tests-\(UUID().uuidString)", isDirectory: true)
+        installedApplicationURL = root.appendingPathComponent("Applications/QuotaPet.app", isDirectory: true)
+        try FileManager.default.createDirectory(at: root.appendingPathComponent("dist"), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: root.appendingPathComponent("Applications"), withIntermediateDirectories: true)
+        try writeVersion("new-app", at: root.appendingPathComponent("fixture/QuotaPet.app/version"))
+        try writeVersion("new-zip", at: root.appendingPathComponent("fixture/QuotaPet.zip"))
+        try writeVersion("new-app", at: root.appendingPathComponent("source/QuotaPet.app/version"))
+        if hasOldApplication {
+            try writeVersion("old-app", at: root.appendingPathComponent("dist/QuotaPet.app/version"))
+            try writeVersion("old-app", at: installedApplicationURL.appendingPathComponent("version"))
+        }
+        if hasOldZip {
+            try writeVersion("old-zip", at: root.appendingPathComponent("dist/QuotaPet.zip"))
+        }
+    }
+
+    deinit { try? FileManager.default.removeItem(at: root) }
+
+    func applicationVersion() throws -> String {
+        try readVersion(at: root.appendingPathComponent("dist/QuotaPet.app/version"))
+    }
+
+    func installedApplicationVersion() throws -> String {
+        try readVersion(at: installedApplicationURL.appendingPathComponent("version"))
+    }
+
+    func zipVersion() throws -> String {
+        try readVersion(at: root.appendingPathComponent("dist/QuotaPet.zip"))
+    }
+
+    private func writeVersion(_ value: String, at url: URL) throws {
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data(value.utf8).write(to: url)
+    }
+
+    private func readVersion(at url: URL) throws -> String {
+        try String(contentsOf: url, encoding: .utf8)
     }
 }

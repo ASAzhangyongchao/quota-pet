@@ -3,108 +3,197 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd -P)"
-DIST_DIR="$PROJECT_ROOT/dist"
+TEST_MODE="${QUOTAPET_TEST_MODE:-0}"
+TEST_HOOK="${QUOTAPET_TEST_HOOK:-}"
+
+if [[ "$TEST_MODE" == "1" ]]; then
+    [[ -d "${QUOTAPET_TEST_ROOT:-}" ]] || { echo "Invalid transaction test root." >&2; exit 64; }
+    TEST_ROOT="$(cd -- "$QUOTAPET_TEST_ROOT" && pwd -P)"
+    TEMP_BASE="$(cd -- "${TMPDIR:-/tmp}" && pwd -P)"
+    case "$TEST_ROOT" in
+        "$TEMP_BASE"/QuotaPet-transaction-tests-*|/private/tmp/QuotaPet-transaction-tests-*) ;;
+        *) echo "Transaction test root must be a dedicated temporary directory." >&2; exit 64 ;;
+    esac
+    [[ -d "$TEST_ROOT/dist" && ! -L "$TEST_ROOT/dist" ]] || { echo "Unsafe transaction test dist directory." >&2; exit 64; }
+    DIST_DIR="$(cd -- "$TEST_ROOT/dist" && pwd -P)"
+    [[ "$DIST_DIR" == "$TEST_ROOT/dist" ]] || { echo "Transaction test dist must not escape its root." >&2; exit 64; }
+else
+    mkdir -p -- "$PROJECT_ROOT/dist"
+    [[ ! -L "$PROJECT_ROOT/dist" ]] || { echo "Project dist must not be a symbolic link." >&2; exit 1; }
+    DIST_DIR="$(cd -- "$PROJECT_ROOT/dist" && pwd -P)"
+    [[ "$DIST_DIR" == "$PROJECT_ROOT/dist" ]] || { echo "Project dist escaped its root." >&2; exit 1; }
+fi
+
 FINAL_APP="$DIST_DIR/QuotaPet.app"
 FINAL_ZIP="$DIST_DIR/QuotaPet.zip"
+STAGING_DIR=""
+TRANSACTION_DIR=""
 
 case "$DIST_DIR" in
-    "$PROJECT_ROOT/dist") ;;
+    "$PROJECT_ROOT/dist"|*/QuotaPet-transaction-tests-*/dist) ;;
     *) echo "Refusing unsafe dist path: $DIST_DIR" >&2; exit 1 ;;
 esac
 
-mkdir -p -- "$DIST_DIR"
-STAGING_DIR="$(mktemp -d "$DIST_DIR/.staging-XXXXXX")"
-NEXT_APP="$DIST_DIR/.QuotaPet.app.next.$$"
-NEXT_ZIP="$DIST_DIR/.QuotaPet.zip.next.$$"
-OLD_APP="$DIST_DIR/.QuotaPet.app.previous.$$"
-OLD_ZIP="$DIST_DIR/.QuotaPet.zip.previous.$$"
-COMMITTING=0
-HAD_OLD_APP=0
-HAD_OLD_ZIP=0
+run_test_hook() {
+    local point="$1"
+    [[ "$TEST_MODE" == "1" ]] || return 0
+    case "$TEST_HOOK" in
+        "fail:$point") return 97 ;;
+        "int:$point") kill -INT "$$" ;;
+        "term:$point") kill -TERM "$$" ;;
+    esac
+}
 
-safe_remove() {
+safe_remove_temporary() {
     local path="${1:-}"
     case "$path" in
-        "$DIST_DIR"/.staging-*|"$DIST_DIR"/.QuotaPet.app.next.*|"$DIST_DIR"/.QuotaPet.zip.next.*|"$DIST_DIR"/.QuotaPet.app.previous.*|"$DIST_DIR"/.QuotaPet.zip.previous.*)
+        "$DIST_DIR"/.staging-*|"$DIST_DIR"/.transaction-*)
             [[ -n "$path" && "$path" != "/" && "$path" != "$DIST_DIR" ]] || return 1
             rm -rf -- "$path"
             ;;
         "") ;;
-        *) echo "Refusing unsafe cleanup path: $path" >&2; return 1 ;;
+        *) echo "Refusing unsafe temporary cleanup path: $path" >&2; return 1 ;;
     esac
 }
 
-rollback_artifacts() {
-    [[ "$COMMITTING" -eq 1 ]] || return 0
-    if [[ "$HAD_OLD_APP" -eq 1 && -e "$OLD_APP" ]]; then
-        [[ ! -e "$FINAL_APP" ]] || rm -rf -- "$FINAL_APP"
-        mv -- "$OLD_APP" "$FINAL_APP"
-    elif [[ "$HAD_OLD_APP" -eq 0 && -e "$FINAL_APP" ]]; then
-        rm -rf -- "$FINAL_APP"
+safe_remove_final() {
+    local path="$1"
+    case "$path" in
+        "$FINAL_APP") rm -rf -- "$path" ;;
+        "$FINAL_ZIP") rm -f -- "$path" ;;
+        *) echo "Refusing unsafe final cleanup path: $path" >&2; return 1 ;;
+    esac
+}
+
+rollback_artifact() {
+    local final="$1" backup="$2" new_payload="$3" original_marker="$4" install_intent="$5"
+    if [[ -e "$backup" ]]; then
+        [[ ! -e "$final" ]] || safe_remove_final "$final"
+        mv -- "$backup" "$final"
+    elif [[ -e "$original_marker" ]]; then
+        # The original never left final, or was already restored. Never delete it.
+        return 0
+    elif [[ -e "$install_intent" && ! -e "$new_payload" && -e "$final" ]]; then
+        # There was no original and the staged payload demonstrably reached final.
+        safe_remove_final "$final"
     fi
-    if [[ "$HAD_OLD_ZIP" -eq 1 && -e "$OLD_ZIP" ]]; then
-        [[ ! -e "$FINAL_ZIP" ]] || rm -f -- "$FINAL_ZIP"
-        mv -- "$OLD_ZIP" "$FINAL_ZIP"
-    elif [[ "$HAD_OLD_ZIP" -eq 0 && -e "$FINAL_ZIP" ]]; then
-        rm -f -- "$FINAL_ZIP"
-    fi
+}
+
+rollback_transaction() {
+    local transaction="$1"
+    local failed=0
+    rollback_artifact \
+        "$FINAL_APP" "$transaction/QuotaPet.previous.app" "$transaction/QuotaPet.new.app" \
+        "$transaction/original-app-present" "$transaction/app-install-intent" || failed=1
+    rollback_artifact \
+        "$FINAL_ZIP" "$transaction/QuotaPet.previous.zip" "$transaction/QuotaPet.new.zip" \
+        "$transaction/original-zip-present" "$transaction/zip-install-intent" || failed=1
+    return "$failed"
+}
+
+validate_transaction_dir() {
+    local transaction="$1" canonical
+    [[ -d "$transaction" && ! -L "$transaction" ]] || return 1
+    canonical="$(cd -- "$transaction" && pwd -P)"
+    [[ "$canonical" == "$transaction" && "$canonical" == "$DIST_DIR"/.transaction-* ]]
+}
+
+recover_orphaned_transactions() {
+    local transaction owner
+    for transaction in "$DIST_DIR"/.transaction-*; do
+        [[ -d "$transaction" ]] || continue
+        validate_transaction_dir "$transaction" || { echo "Refusing unsafe packaging transaction: $transaction" >&2; return 1; }
+        owner="$(sed -n '1p' "$transaction/owner-pid" 2>/dev/null || true)"
+        if [[ "$owner" =~ ^[0-9]+$ && "$owner" != "$$" ]] && kill -0 "$owner" 2>/dev/null; then
+            echo "Another QuotaPet packaging transaction is active." >&2
+            return 1
+        fi
+        TRANSACTION_DIR="$transaction"
+        rollback_transaction "$transaction"
+        safe_remove_temporary "$transaction"
+        TRANSACTION_DIR=""
+    done
 }
 
 cleanup() {
-    local status=$?
-    trap - EXIT INT TERM
-    if [[ "$status" -ne 0 ]]; then
-        rollback_artifacts || true
+    local status=$? rollback_ok=1
+    trap - EXIT
+    trap '' INT TERM
+    if [[ "$status" -ne 0 && -d "$TRANSACTION_DIR" ]]; then
+        validate_transaction_dir "$TRANSACTION_DIR" || rollback_ok=0
     fi
-    safe_remove "$STAGING_DIR" || true
-    safe_remove "$NEXT_APP" || true
-    safe_remove "$NEXT_ZIP" || true
-    if [[ "$COMMITTING" -eq 0 ]]; then
-        safe_remove "$OLD_APP" || true
-        safe_remove "$OLD_ZIP" || true
+    if [[ "$status" -ne 0 && "$rollback_ok" -eq 1 && -d "$TRANSACTION_DIR" ]]; then
+        rollback_transaction "$TRANSACTION_DIR" || rollback_ok=0
+    fi
+    safe_remove_temporary "$STAGING_DIR" || true
+    if [[ "$rollback_ok" -eq 1 ]]; then
+        safe_remove_temporary "$TRANSACTION_DIR" || true
+    else
+        echo "Rollback was incomplete; preserved transaction at $TRANSACTION_DIR" >&2
     fi
     exit "$status"
 }
-trap cleanup EXIT INT TERM
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
-cd -- "$PROJECT_ROOT"
-plutil -lint Resources/Info.plist >/dev/null
-[[ -s Resources/AppIcon.icns ]] || { echo "Resources/AppIcon.icns is missing; run scripts/generate-icon.swift" >&2; exit 1; }
-
-swift build -c release -Xswiftc -gnone
-BIN_DIR="$(swift build -c release -Xswiftc -gnone --show-bin-path)"
-[[ -x "$BIN_DIR/QuotaPet" ]] || { echo "Release executable was not produced" >&2; exit 1; }
-
+recover_orphaned_transactions
+STAGING_DIR="$(mktemp -d "$DIST_DIR/.staging-XXXXXX")"
 STAGED_APP="$STAGING_DIR/QuotaPet.app"
 STAGED_ZIP="$STAGING_DIR/QuotaPet.zip"
-mkdir -p -- "$STAGED_APP/Contents/MacOS" "$STAGED_APP/Contents/Resources"
-install -m 0755 "$BIN_DIR/QuotaPet" "$STAGED_APP/Contents/MacOS/QuotaPet"
-strip -S -x "$STAGED_APP/Contents/MacOS/QuotaPet"
-install -m 0644 Resources/Info.plist "$STAGED_APP/Contents/Info.plist"
-install -m 0644 Resources/AppIcon.icns "$STAGED_APP/Contents/Resources/AppIcon.icns"
 
-codesign --force --deep --sign - "$STAGED_APP"
-codesign --verify --deep --strict "$STAGED_APP"
-ditto -c -k --sequesterRsrc --keepParent "$STAGED_APP" "$STAGED_ZIP"
-unzip -tq "$STAGED_ZIP" >/dev/null
+if [[ "$TEST_MODE" == "1" ]]; then
+    cp -R -- "$TEST_ROOT/fixture/QuotaPet.app" "$STAGED_APP"
+    cp -- "$TEST_ROOT/fixture/QuotaPet.zip" "$STAGED_ZIP"
+else
+    cd -- "$PROJECT_ROOT"
+    plutil -lint Resources/Info.plist >/dev/null
+    [[ -s Resources/AppIcon.icns ]] || { echo "Resources/AppIcon.icns is missing; run scripts/generate-icon.swift" >&2; exit 1; }
+    swift build -c release -Xswiftc -gnone
+    BIN_DIR="$(swift build -c release -Xswiftc -gnone --show-bin-path)"
+    [[ -x "$BIN_DIR/QuotaPet" ]] || { echo "Release executable was not produced" >&2; exit 1; }
+    mkdir -p -- "$STAGED_APP/Contents/MacOS" "$STAGED_APP/Contents/Resources"
+    install -m 0755 "$BIN_DIR/QuotaPet" "$STAGED_APP/Contents/MacOS/QuotaPet"
+    strip -S -x "$STAGED_APP/Contents/MacOS/QuotaPet"
+    install -m 0644 Resources/Info.plist "$STAGED_APP/Contents/Info.plist"
+    install -m 0644 Resources/AppIcon.icns "$STAGED_APP/Contents/Resources/AppIcon.icns"
+    codesign --force --deep --sign - "$STAGED_APP"
+    codesign --verify --deep --strict "$STAGED_APP"
+    ditto -c -k --sequesterRsrc --keepParent "$STAGED_APP" "$STAGED_ZIP"
+    unzip -tq "$STAGED_ZIP" >/dev/null
+fi
 
-mv -- "$STAGED_APP" "$NEXT_APP"
-mv -- "$STAGED_ZIP" "$NEXT_ZIP"
+TRANSACTION_DIR="$(mktemp -d "$DIST_DIR/.transaction-XXXXXX")"
+printf '%s\n' "$$" >"$TRANSACTION_DIR/owner-pid"
+NEW_APP="$TRANSACTION_DIR/QuotaPet.new.app"
+NEW_ZIP="$TRANSACTION_DIR/QuotaPet.new.zip"
+BACKUP_APP="$TRANSACTION_DIR/QuotaPet.previous.app"
+BACKUP_ZIP="$TRANSACTION_DIR/QuotaPet.previous.zip"
+mv -- "$STAGED_APP" "$NEW_APP"
+mv -- "$STAGED_ZIP" "$NEW_ZIP"
 
-COMMITTING=1
 if [[ -e "$FINAL_APP" ]]; then
-    mv -- "$FINAL_APP" "$OLD_APP"
-    HAD_OLD_APP=1
+    touch "$TRANSACTION_DIR/original-app-present"
+    run_test_hook before_backup_app
+    mv -- "$FINAL_APP" "$BACKUP_APP"
+    run_test_hook after_backup_app
 fi
 if [[ -e "$FINAL_ZIP" ]]; then
-    mv -- "$FINAL_ZIP" "$OLD_ZIP"
-    HAD_OLD_ZIP=1
+    touch "$TRANSACTION_DIR/original-zip-present"
+    run_test_hook before_backup_zip
+    mv -- "$FINAL_ZIP" "$BACKUP_ZIP"
+    run_test_hook after_backup_zip
 fi
-mv -- "$NEXT_APP" "$FINAL_APP"
-mv -- "$NEXT_ZIP" "$FINAL_ZIP"
-COMMITTING=0
-safe_remove "$OLD_APP"
-safe_remove "$OLD_ZIP"
+
+touch "$TRANSACTION_DIR/app-install-intent"
+mv -- "$NEW_APP" "$FINAL_APP"
+run_test_hook after_new_app
+touch "$TRANSACTION_DIR/zip-install-intent"
+mv -- "$NEW_ZIP" "$FINAL_ZIP"
+run_test_hook after_new_zip
+
+safe_remove_temporary "$TRANSACTION_DIR"
+TRANSACTION_DIR=""
 
 echo "Built $FINAL_APP"
 echo "Built $FINAL_ZIP"
