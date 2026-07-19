@@ -1,5 +1,6 @@
 import Foundation
 import XCTest
+@testable import QuotaPet
 
 final class PerformanceContractTests: XCTestCase {
     private var repositoryRoot: URL {
@@ -7,6 +8,16 @@ final class PerformanceContractTests: XCTestCase {
             .deletingLastPathComponent()
             .deletingLastPathComponent()
             .deletingLastPathComponent()
+    }
+
+    func testGlowUsesOnlyStaticExplicitShadowPaths() throws {
+        let source = try contents(of: "Sources/QuotaPet/Pet/PetGlowContainerView.swift")
+        for forbidden in ["CABasicAnimation", "CAKeyframeAnimation", "CVDisplayLink", "Timer.scheduledTimer", "repeatCount"] {
+            XCTAssertFalse(source.contains(forbidden), "Glow source contains continuous-work primitive: \(forbidden)")
+        }
+        XCTAssertTrue(source.contains("ambientLayer.shadowPath = path"))
+        XCTAssertTrue(source.contains("accentLayer.shadowPath = path"))
+        XCTAssertTrue(source.contains("CATransaction.setDisableActions(true)"))
     }
 
     func testPerformanceScriptUsesFormalDurationsAndTransactionalReportWrite() throws {

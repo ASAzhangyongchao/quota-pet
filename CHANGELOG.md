@@ -4,7 +4,21 @@
 
 All notable changes follow Semantic Versioning.
 
-## [0.1.2] - Unreleased
+## [0.1.3] - Unreleased
+
+### Added
+
+- Static semantic glow around the collapsed pet and expanded glass card.
+- High-contrast used/remaining ring segments and matching accessible quota meters.
+- Separate English and Chinese legal, brand, and contribution guidance.
+- A localized About & Legal disclosure in Settings and release legal-review gates.
+
+### Changed
+
+- Kept the visible pet at 72 points while adding a six-point on-screen glow margin.
+- Updated the public metadata to version 0.1.3 build 4.
+
+## [0.1.2] - 2026-07-19
 
 ### Added
 

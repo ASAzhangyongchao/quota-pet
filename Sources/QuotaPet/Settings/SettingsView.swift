@@ -8,7 +8,7 @@ final class SettingsWindowController: NSWindowController {
         let hosting = NSHostingController(rootView: view)
         let window = NSWindow(contentViewController: hosting)
         window.title = L10n.text(.settingsTitle)
-        window.setContentSize(NSSize(width: 420, height: 370))
+        window.setContentSize(NSSize(width: 420, height: 470))
         super.init(window: window)
     }
     required init?(coder: NSCoder) { nil }
@@ -55,6 +55,14 @@ private struct SettingsView: View {
                         } else if case let .rejected(error) = resolution { Text(L10n.text(.settingsRejected, arguments: [error.localizedMessage()])).font(.caption).foregroundStyle(.red) }
                     }
                 }
+            }
+            Section(L10n.text(.settingsAboutLegal)) {
+                Text(L10n.text(.settingsUnofficialNotice))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text(L10n.text(.settingsMarksNotice))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
             }
         }.padding()
     }

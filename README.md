@@ -15,7 +15,7 @@ QuotaPet is an unofficial, local-first macOS companion that shows Codex usage as
 
 The two service limits are shown as **General usage limit** and **GPT-5.3-Codex-Spark usage limit**. Reset countdowns use hours below 24 hours and days at or above 24 hours.
 
-For settings, updates, troubleshooting, and removal, read the [English user guide](docs/USER_GUIDE.md).
+For settings, updates, troubleshooting, and removal, read the [English user guide](docs/USER_GUIDE.md). For non-affiliation, trademark, compatibility, and original-asset provenance, read [LEGAL.md](LEGAL.md). Contributors should follow [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Features
 
@@ -68,4 +68,4 @@ The tag-gated workflow builds Universal ZIP and DMG artifacts, notarizes and sta
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE) and the separate [legal and brand notice](LEGAL.md).

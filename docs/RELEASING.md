@@ -31,6 +31,19 @@ QuotaPet follows Semantic Versioning:
 4. Confirm the built app reports the intended version and contains both `en.lproj` and `zh-Hans.lproj`.
 5. Review privacy, security, dependency, license, and release-note changes.
 
+## Legal and brand release gates
+
+Treat each item as fail-closed and record the reviewer/date in the release pull request:
+
+1. Repeat a public **name conflict** search for `QuotaPet` in the intended markets.
+2. Review the current **OpenAI brand** rules and confirm the app title and icon do not imply affiliation.
+3. Review **asset provenance** for code-generated art plus every font, image, icon, sound, and screenshot.
+4. Run a **dependency license** review and confirm `DEPENDENCIES.md` matches the package graph.
+5. Review every **privacy change**, new permission, network destination, persisted field, and diagnostic output.
+6. Obtain **formal trademark clearance** before commercialization, App Store submission, or entry into a new target market. Public searching is only preliminary; useful starting points include WIPO's [Global Brand Database](https://www.wipo.int/en/web/global-brand-database) and [CNIPA](https://www.cnipa.gov.cn/art/2020/6/17/art_75_126939.html).
+
+Also re-read [LEGAL.md](../LEGAL.md) and confirm the non-affiliation and compatibility statements still match actual behavior.
+
 ## Release prerequisites
 
 Configure the protected GitHub environment named `release`, restrict it to version tags, require reviewers, and add only these secrets there:
@@ -46,8 +59,8 @@ The workflow fails closed when a prerequisite is missing. It signs with hardened
 Only after every prerequisite is confirmed:
 
 ```bash
-git tag -s v0.1.2 -m "QuotaPet 0.1.2"
-git push origin v0.1.2
+git tag -s v0.1.3 -m "QuotaPet 0.1.3"
+git push origin v0.1.3
 ```
 
 The tag must exactly match `VERSION` and Info.plist. The release workflow publishes `QuotaPet-VERSION.zip`, `QuotaPet-VERSION.dmg`, `SHA256SUMS`, the SBOM, and `quotapet.rb`.
@@ -62,6 +75,6 @@ The generated cask pins the versioned GitHub Release URL and literal DMG SHA256;
 
 Do not rewrite or delete a published tag. If a release is unsafe, mark it clearly in GitHub, remove it from the Homebrew tap, and publish a higher patch version containing the correction. Users can temporarily reinstall a previously verified versioned artifact. Preserve checksums, release notes, and the Git history for auditability.
 
-## Current 0.1.2 status
+## Current 0.1.3 status
 
-Version 0.1.2 build 3 may be built and installed locally. Do not tag or publish it until the signing, notarization, protected-environment, and clean-machine prerequisites above are actually available.
+Version 0.1.3 build 4 may be built and installed locally. Do not tag or publish it until the signing, notarization, protected-environment, legal-review, and clean-machine prerequisites above are actually available.

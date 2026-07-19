@@ -56,7 +56,8 @@ plutil -lint "$INFO_PLIST" >/dev/null
 VERSION="$(sed -n '1p' "$PROJECT_ROOT/VERSION")"
 [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail "VERSION format"
 [[ "$(plist_value "$INFO_PLIST" CFBundleShortVersionString)" == "$VERSION" ]] || fail "short version"
-[[ "$(plist_value "$INFO_PLIST" CFBundleVersion)" == "3" ]] || fail "build version"
+BUILD_VERSION="$(plist_value "$INFO_PLIST" CFBundleVersion)"
+[[ "$BUILD_VERSION" =~ ^[1-9][0-9]*$ ]] || fail "build version"
 [[ "$(plist_value "$INFO_PLIST" LSMinimumSystemVersion)" == "13.0" ]] || fail "minimum macOS"
 
 for key in \

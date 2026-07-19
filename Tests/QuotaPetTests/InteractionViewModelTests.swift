@@ -1,3 +1,4 @@
+import Combine
 import XCTest
 @testable import QuotaPet
 
@@ -55,12 +56,20 @@ final class InteractionViewModelTests: XCTestCase {
             snapshot: makeSnapshot(used: 10),
             successFeedbackDurationNanoseconds: 10_000_000
         )
+        let restored = expectation(description: "refresh feedback returned to idle")
+        var subscriptions = Set<AnyCancellable>()
+        details.$refreshFeedback
+            .dropFirst()
+            .sink { feedback in
+                if feedback == .idle { restored.fulfill() }
+            }
+            .store(in: &subscriptions)
 
         details.beginRefresh()
         details.update(makeSnapshot(used: 20))
         XCTAssertEqual(details.refreshFeedback, .succeeded)
 
-        try await Task.sleep(nanoseconds: 40_000_000)
+        await fulfillment(of: [restored], timeout: 1)
         XCTAssertEqual(details.refreshFeedback, .idle)
     }
 }

@@ -17,19 +17,23 @@ final class UsageDetailsTests: XCTestCase {
         XCTAssertNil(details.updatedText)
     }
 
-    func testDetailFormattingIncludesWindowsResetTimezoneAndStaleStatus() {
+    func testDetailFormattingIncludesWindowsResetTimezoneAndStaleStatus() throws {
         let reset = ISO8601DateFormatter().date(from: "2026-07-20T01:00:00Z")!
         let snapshot = QuotaSnapshot(planType: "Plus", windows: [QuotaWindow(id: "codex", bucketID: "codex", displayName: "Codex", usedPercent: 18, remainingPercent: 82, windowDurationMinutes: 300, resetsAt: reset, isReached: false)], updatedAt: ISO8601DateFormatter().date(from: "2026-07-19T12:00:00Z")!, state: .stale("连接中断"))
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(secondsFromGMT: 8 * 3600)!
         let details = UsageDetailsPresentation(snapshot: snapshot, now: ISO8601DateFormatter().date(from: "2026-07-19T23:00:00Z")!, calendar: calendar, language: .simplifiedChinese)
 
+        let window = try XCTUnwrap(details.windows.first)
         XCTAssertEqual(details.primaryText, "剩余 82% · 已用 18%")
-        XCTAssertEqual(details.windows.first?.durationText, "5小时")
-        XCTAssertEqual(details.windows.first?.resetText, "重置于 2026年7月20日 09:00")
+        XCTAssertEqual(window.durationText, "5小时")
+        XCTAssertEqual(window.usedFraction, 0.18, accuracy: 0.0001)
+        XCTAssertEqual(window.remainingFraction, 0.82, accuracy: 0.0001)
+        XCTAssertEqual(window.meterAccessibilityText, "已用 18%，剩余 82%")
+        XCTAssertEqual(window.resetText, "重置于 2026年7月20日 09:00")
         XCTAssertEqual(details.statusText, "数据已过期：连接中断")
         XCTAssertEqual(details.updatedText, "更新于 2026年7月19日 20:00")
-        XCTAssertEqual(details.windows.first?.countdownText, "距重置 2小时")
+        XCTAssertEqual(window.countdownText, "距重置 2小时")
     }
 
     func testLongCountdownUsesDaysAndInternalPrimaryNamesAreHidden() {
@@ -92,5 +96,6 @@ final class UsageDetailsTests: XCTestCase {
 
         XCTAssertEqual(details.windows.map(\.name), ["General usage limit", "GPT-5.3-Codex-Spark usage limit"])
         XCTAssertTrue(details.windows.allSatisfy { $0.noteText == nil })
+        XCTAssertEqual(details.windows.first?.meterAccessibilityText, "Used 10%, remaining 90%")
     }
 }

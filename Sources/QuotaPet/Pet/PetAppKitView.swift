@@ -47,7 +47,7 @@ final class PetAppKitView: NSView {
         self.renderState = renderState
         self.onClick = onClick
         self.onHover = onHover
-        super.init(frame: NSRect(origin: .zero, size: FloatingPetPanelContract.default.size))
+        super.init(frame: NSRect(origin: .zero, size: FloatingPetPanelContract.visiblePetSize))
         setAccessibilityElement(true)
         setAccessibilityRole(.button)
     }
