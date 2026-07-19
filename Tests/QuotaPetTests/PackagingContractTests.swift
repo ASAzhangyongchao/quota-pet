@@ -20,8 +20,8 @@ final class PackagingContractTests: XCTestCase {
         XCTAssertEqual(plist["CFBundleExecutable"] as? String, "QuotaPet")
         XCTAssertEqual(plist["CFBundleIconFile"] as? String, "AppIcon")
         XCTAssertEqual(plist["LSUIElement"] as? Bool, true)
-        XCTAssertEqual(plist["CFBundleShortVersionString"] as? String, "0.1.0")
-        XCTAssertEqual(plist["CFBundleVersion"] as? String, "1")
+        XCTAssertEqual(plist["CFBundleShortVersionString"] as? String, "0.1.1")
+        XCTAssertEqual(plist["CFBundleVersion"] as? String, "2")
         XCTAssertEqual(plist["LSMinimumSystemVersion"] as? String, "13.0")
 
         let forbiddenKeys = [

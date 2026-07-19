@@ -11,6 +11,7 @@ QuotaPet 是一款非官方、本地优先的 macOS 菜单栏工具，用原创�
 - Energy-saving by default on new installs, with an optional real-time mode / 新安装默认节能，可手动切换实时模式
 - Local threshold notifications and launch at login / 本地阈值通知与登录时启动
 - Explicit Codex executable trust review / Codex 可执行文件显式信任审核
+- Direct connection recovery from either usage card / 可直接在任一用量卡片中确认并恢复连接
 
 ## Screenshot / 截图
 
@@ -67,11 +68,13 @@ Before installing, run `swift test`, `./scripts/build-app.sh`, and `./scripts/ve
 
 QuotaPet inspects candidate paths without executing them. It resolves symbolic links, checks ownership and writable permissions, records signing identity and a file fingerprint, and shows the real path for review. Automatically trusted official app-bundle candidates must match the maintained signing allow-list. Homebrew, local `PATH`, and manually selected candidates require explicit confirmation; changed files require confirmation again.
 
+When a safe candidate needs confirmation, either usage card shows its canonical local path before offering “确认并读取用量”. No usage timestamp is shown until real quota data exists; successful data uses localized refresh/reset dates, day-based countdowns beyond 24 hours, and hides backend-only role names such as `primary`.
+
 QuotaPet does not bundle, modify, or download Codex. Only approve a path you recognize from an official Codex installation.
 
 ### Read-only Codex integration test / Codex 只读集成测试
 
-The real Codex integration test is skipped by default. It uses the same executable resolver and revalidation gates as the app, performs one App Server handshake and one `account/rateLimits/read`, prints only sanitized window percentages/reset times, and shuts the child down. Run it explicitly on a machine with an authenticated, automatically trusted official Codex bundle:
+The real Codex integration test is skipped by default. It uses the same executable resolver, explicit confirmation, and revalidation gates as the app, performs one App Server handshake and one `account/rateLimits/read`, prints only sanitized window percentages/reset times, and shuts the child down. Run it explicitly on a machine with an authenticated Codex app bundle:
 
 ```bash
 QUOTAPET_CODEX_INTEGRATION=1 swift test --filter CodexIntegrationTests
@@ -102,7 +105,7 @@ The release workflow builds a Universal `arm64`/`x86_64` app, enables hardened r
 To generate the fixed-version Homebrew cask after obtaining the final DMG checksum:
 
 ```bash
-./scripts/update-cask.sh 0.1.0 <64-character-dmg-sha256> /path/to/homebrew-tap/Casks/quotapet.rb
+./scripts/update-cask.sh 0.1.1 <64-character-dmg-sha256> /path/to/homebrew-tap/Casks/quotapet.rb
 ```
 
 The cask URL is fixed to this repository's versioned GitHub Release path and the SHA256 is always literal; it never follows a `latest` URL. Do not create or push a tag until the `release` environment, Developer ID identity, notarization API key, clean-machine verification plan, and authenticated GitHub publishing access have all been confirmed.

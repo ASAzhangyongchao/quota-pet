@@ -161,13 +161,18 @@ extension CodexExecutableResolver: AppExecutableResolving {}
 final class AppComposition {
     let provider: any UsageProvider
     let model: AppModel
+    let resolutions: [ExecutableResolution]
+    let pendingConfirmationCandidate: ExecutableCandidate?
 
     init(
         resolver: any AppExecutableResolving = CodexExecutableResolver(),
         sessionFactory: any CodexAppServerSessionFactory = FoundationCodexAppServerSessionFactory(),
         store: any AppPreferenceStoring = UserDefaults.standard
     ) {
-        let trustedCandidate = resolver.resolve(userSelectedURL: nil, path: ProcessInfo.processInfo.environment["PATH"]).compactMap { resolution -> ExecutableCandidate? in
+        let resolutions = resolver.resolve(userSelectedURL: nil, path: ProcessInfo.processInfo.environment["PATH"])
+        self.resolutions = resolutions
+        pendingConfirmationCandidate = resolutions.first(where: \.requiresConfirmation)?.candidate
+        let trustedCandidate = resolutions.compactMap { resolution -> ExecutableCandidate? in
             guard case let .accepted(candidate, trust) = resolution,
                   trust == .bundleAllowList || trust == .confirmed
             else { return nil }

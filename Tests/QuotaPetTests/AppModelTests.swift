@@ -92,6 +92,18 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(composition.model.snapshot.state, .unavailable("未找到已信任的 Codex 可执行文件"))
     }
 
+    func testCompositionExposesRequiresConfirmationCandidate() {
+        let candidate = compositionCandidate()
+        let composition = AppComposition(
+            resolver: CompositionResolver(resolution: .accepted(candidate, trust: .requiresConfirmation)),
+            sessionFactory: CompositionSessionFactory(),
+            store: makeStore()
+        )
+
+        XCTAssertEqual(composition.pendingConfirmationCandidate, candidate)
+        XCTAssertTrue(composition.provider is UnavailableUsageProvider)
+    }
+
     func testCompositionBuildsTrustedProviderWithInjectedFoundationFactory() {
         let composition = AppComposition(
             resolver: CompositionResolver(resolution: .accepted(compositionCandidate(), trust: .confirmed)),

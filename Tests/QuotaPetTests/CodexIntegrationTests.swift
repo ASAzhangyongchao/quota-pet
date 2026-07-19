@@ -26,7 +26,7 @@ final class CodexIntegrationTests: XCTestCase {
         let resolver = CodexExecutableResolver()
         let candidate = trustedCandidate(using: resolver)
         guard let candidate else {
-            throw XCTSkip("No trusted official Codex bundle is installed")
+            throw XCTSkip("No safe Codex app-bundle candidate is installed")
         }
         guard resolver.revalidate(candidate) else {
             XCTFail("The trusted Codex executable changed before launch")
@@ -64,36 +64,16 @@ final class CodexIntegrationTests: XCTestCase {
     }
 
     private func trustedCandidate(using resolver: CodexExecutableResolver) -> ExecutableCandidate? {
-        let automatic = resolver.resolve().compactMap { resolution -> ExecutableCandidate? in
-            guard case let .accepted(candidate, trust) = resolution, trust == .bundleAllowList else {
-                return nil
-            }
-            return candidate
-        }.first
-        if let automatic, resolver.revalidate(automatic) { return automatic }
-
-        let stableCandidates: [ExecutablePathInput] = [
-            .init(
-                url: URL(fileURLWithPath: "/Applications/ChatGPT.app/Contents/Resources/codex"),
-                source: .chatGPTBundle
-            ),
-            .init(
-                url: URL(fileURLWithPath: "/Applications/Codex.app/Contents/Resources/codex"),
-                source: .codexBundle
-            ),
-        ]
-        for input in stableCandidates where FileManager.default.fileExists(atPath: input.url.path) {
-            guard let inspection = try? CodexStaticExecutableInspector().inspect(url: input.url, source: input.source),
-                  inspection.signatureIsValid,
-                  inspection.bundleIdentifier == "com.openai.codex",
-                  inspection.candidate.signingIdentifier == "com.openai.codex",
-                  inspection.candidate.teamIdentifier == "2DC432GLL2",
-                  case let .accepted(candidate, trust)? = resolver.inspect([input]).first,
-                  trust == .requiresConfirmation,
-                  resolver.confirm(candidate),
-                  resolver.revalidate(candidate)
+        for resolution in resolver.resolve() {
+            guard case let .accepted(candidate, trust) = resolution,
+                  candidate.source == .chatGPTBundle || candidate.source == .codexBundle
             else { continue }
-            return candidate
+            switch trust {
+            case .bundleAllowList, .confirmed:
+                if resolver.revalidate(candidate) { return candidate }
+            case .requiresConfirmation:
+                if resolver.confirm(candidate), resolver.revalidate(candidate) { return candidate }
+            }
         }
         return nil
     }
@@ -106,8 +86,11 @@ final class CodexIntegrationTests: XCTestCase {
             group.addTask {
                 for await snapshot in stream {
                     if snapshot.state == .ready { return snapshot }
-                    if case let .incompatible(message) = snapshot.state {
+                    switch snapshot.state {
+                    case let .incompatible(message), let .unavailable(message), let .stale(message):
                         throw IntegrationFailure(message: message)
+                    case .loading, .ready:
+                        break
                     }
                 }
                 throw IntegrationFailure(message: "Usage stream ended before a ready snapshot")

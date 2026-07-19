@@ -87,14 +87,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.launchAtLogin = launchAtLogin
         preferences.setLaunchAtLoginState(enabled: launchAtLogin.isEnabled, errorMessage: nil)
         localNotifications = LocalNotificationController()
+        let connectionOffer = makeConnectionOffer(
+            composition: composition,
+            resolver: resolver,
+            preferences: preferences
+        )
         statusController = StatusItemController(
             model: composition.model,
             preferences: preferences,
             onSettings: { [weak self] in self?.showSettings() },
             onQuit: { [weak self] in self?.stopAndQuit() },
-            onRecoverInteraction: { [weak self] in self?.floatingPetController?.showAndRecoverInteraction() }
+            onRecoverInteraction: { [weak self] in self?.floatingPetController?.showAndRecoverInteraction() },
+            connectionOffer: connectionOffer
         )
-        floatingPetController = FloatingPetController(model: composition.model, preferences: preferences)
+        floatingPetController = FloatingPetController(
+            model: composition.model,
+            preferences: preferences,
+            connectionOffer: connectionOffer
+        )
         settingsController = DeferredConstruction { [weak self, weak resolver] in
             SettingsWindowController(preferences: preferences, candidates: resolver?.resolve() ?? [], onConfirm: { [weak self, weak resolver] candidate in
                 guard let self, let resolver, resolver.confirm(candidate) else { return }
@@ -133,6 +143,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         lifecycleCoordinator.cancel()
         notificationSubscription?.cancel()
         preferenceSubscriptions.removeAll()
+        floatingPetController?.invalidate()
         floatingPetController = nil
         settingsController = nil
         statusController = nil
@@ -151,14 +162,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let self, let previous = self.composition else { return }
             await previous.model.stop()
             guard !Task.isCancelled, let preferences = self.preferences else { return }
+            self.floatingPetController?.invalidate()
             let replacement = AppComposition(resolver: resolver)
+            let connectionOffer = self.makeConnectionOffer(
+                composition: replacement,
+                resolver: resolver,
+                preferences: preferences
+            )
             self.composition = replacement
-            self.statusController = StatusItemController(model: replacement.model, preferences: preferences, onSettings: { [weak self] in self?.showSettings() }, onQuit: { [weak self] in self?.stopAndQuit() }, onRecoverInteraction: { [weak self] in self?.floatingPetController?.showAndRecoverInteraction() })
-            self.floatingPetController = FloatingPetController(model: replacement.model, preferences: preferences)
+            self.statusController = StatusItemController(model: replacement.model, preferences: preferences, onSettings: { [weak self] in self?.showSettings() }, onQuit: { [weak self] in self?.stopAndQuit() }, onRecoverInteraction: { [weak self] in self?.floatingPetController?.showAndRecoverInteraction() }, connectionOffer: connectionOffer)
+            self.floatingPetController = FloatingPetController(model: replacement.model, preferences: preferences, connectionOffer: connectionOffer)
             self.subscribeToSnapshots(replacement.model)
             self.terminationCoordinator = self.makeTerminationCoordinator()
             if !self.isTerminating, !self.recoveryPolicy.isSleeping { await replacement.model.start() }
         }
+    }
+
+    private func makeConnectionOffer(
+        composition: AppComposition,
+        resolver: CodexExecutableResolver,
+        preferences: Preferences
+    ) -> CodexConnectionOffer? {
+        guard let candidate = composition.pendingConfirmationCandidate else { return nil }
+        return CodexConnectionOffer(
+            displayPath: candidate.canonicalURL.path,
+            confirm: { [weak self, weak resolver, weak preferences] in
+                guard let self, let resolver, let preferences, resolver.confirm(candidate) else { return }
+                preferences.confirmedFingerprints.insert(TrustFingerprint(candidate: candidate))
+                self.restartProvider(resolver: resolver)
+            }
+        )
     }
 
     private func registerHotKey() {

@@ -18,7 +18,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     private let preferences: Preferences?
     private var snapshotSubscription: AnyCancellable?
 
-    init(model: AppModel, preferences: Preferences? = nil, onSettings: @escaping () -> Void, onQuit: @escaping () -> Void, onRecoverInteraction: @escaping () -> Void = {}) {
+    init(model: AppModel, preferences: Preferences? = nil, onSettings: @escaping () -> Void, onQuit: @escaping () -> Void, onRecoverInteraction: @escaping () -> Void = {}, connectionOffer: CodexConnectionOffer? = nil) {
         self.model = model
         self.onSettings = onSettings
         self.onQuit = onQuit
@@ -27,7 +27,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         let detailsViewModel = UsageDetailsViewModel(snapshot: model.snapshot)
         self.detailsViewModel = detailsViewModel
         popoverContent = DeferredConstruction {
-            NSHostingController(rootView: UsagePopoverView(viewModel: detailsViewModel, onRefresh: { [weak model] in
+            NSHostingController(rootView: UsagePopoverView(viewModel: detailsViewModel, connectionOffer: connectionOffer, onRefresh: { [weak model] in
                 Task { await model?.refresh() }
             }))
         }

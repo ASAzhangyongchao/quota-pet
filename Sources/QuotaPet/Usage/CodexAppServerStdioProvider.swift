@@ -197,6 +197,7 @@ final class CodexAppServerStdioProvider: UsageProvider {
 }
 
 private actor UsageCoordinator {
+    private static let standardErrorLimit = 64 * 1_024
     private struct Connection {
         let generation: UInt64
         let session: any CodexAppServerSession
@@ -227,6 +228,7 @@ private actor UsageCoordinator {
     private var operation: Operation?
     private var nextOperationID: UInt64 = 0
     private var policy = RefreshPolicy()
+    private var lastStandardError = Data()
 
     init(candidate: ExecutableCandidate, resolver: any UsageExecutableResolving, sessionFactory: any CodexAppServerSessionFactory, scheduler: any UsageScheduling, requestTimeout: TimeInterval, publish: @escaping (QuotaSnapshot) -> Void) {
         self.candidate = candidate
@@ -331,6 +333,7 @@ private actor UsageCoordinator {
     private func connect() async {
         guard mode != nil, !connecting, connection == nil else { return }
         connecting = true
+        lastStandardError.removeAll(keepingCapacity: true)
         generation += 1
         let currentGeneration = generation
         guard resolver.revalidate(candidate) else {
@@ -366,7 +369,7 @@ private actor UsageCoordinator {
             connecting = false
             handshaking = true
             _ = try await client.request(method: "initialize", params: [
-                "clientInfo": ["name": "quota_pet", "title": "QuotaPet", "version": "0.1.0"],
+                "clientInfo": ["name": "quota_pet", "title": "QuotaPet", "version": "0.1.1"],
             ])
             guard connection?.generation == currentGeneration else { return }
             try await client.sendInitialized(params: [:])
@@ -403,8 +406,15 @@ private actor UsageCoordinator {
     }
 
     private func receiveStandardError(_ data: Data, generation: UInt64) async {
-        guard let connection, connection.generation == generation else { return }
-        await connection.client.appendStandardError(data)
+        guard generation == self.generation else { return }
+        lastStandardError.append(data)
+        let excess = lastStandardError.count - Self.standardErrorLimit
+        if excess > 0 {
+            lastStandardError.removeFirst(excess)
+        }
+        if let connection, connection.generation == generation {
+            await connection.client.appendStandardError(data)
+        }
     }
 
     private func receiveRateLimitUpdate(_ data: Data, generation: UInt64) {
@@ -543,8 +553,7 @@ private actor UsageCoordinator {
     }
 
     func standardErrorTail() async -> Data {
-        guard let connection else { return Data() }
-        return await connection.client.standardErrorTail()
+        lastStandardError
     }
 
     private func publishState(_ state: ConnectionState) {

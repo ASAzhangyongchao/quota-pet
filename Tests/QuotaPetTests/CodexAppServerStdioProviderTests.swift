@@ -18,7 +18,7 @@ final class CodexAppServerStdioProviderTests: XCTestCase {
         XCTAssertEqual(factory.executables, [testCandidate().canonicalURL])
         XCTAssertEqual(factory.arguments, [["app-server", "--stdio"]])
         XCTAssertEqual(try session.method(at: 0), "initialize")
-        XCTAssertEqual(try session.params(at: 0) as? [String: [String: String]], ["clientInfo": ["name": "quota_pet", "title": "QuotaPet", "version": "0.1.0"]])
+        XCTAssertEqual(try session.params(at: 0) as? [String: [String: String]], ["clientInfo": ["name": "quota_pet", "title": "QuotaPet", "version": "0.1.1"]])
 
         session.reply(id: 1, result: [:])
         try await eventually("initialized notification") { session.messages.count >= 2 }
@@ -293,6 +293,23 @@ final class CodexAppServerStdioProviderTests: XCTestCase {
         session.notify(method: "account/rateLimits/updated", params: validRateLimits())
         try await eventually("valid frame after malformed stdout") { snapshots.values.last?.state == .ready }
         try await stop(provider, session: session)
+    }
+
+    func testStandardErrorTailRemainsAvailableAfterUnexpectedExit() async throws {
+        let factory = TestSessionFactory()
+        let provider = CodexAppServerStdioProvider(candidate: testCandidate(), resolver: TestResolver(isTrusted: true), sessionFactory: factory, scheduler: TestScheduler(), requestTimeout: 15)
+        let snapshots = SnapshotRecorder(stream: provider.snapshots)
+        await provider.start(mode: .realtime)
+        let session = try await completeHandshake(factory: factory)
+        let diagnostic = Data("sanitized diagnostic".utf8)
+
+        session.standardError(diagnostic)
+        try await eventuallyAsync("stderr received") { await provider.standardErrorTail() == diagnostic }
+        session.exit()
+
+        try await eventually("unexpected exit observed") { snapshots.values.last?.state == .unavailable("Codex app-server exited") }
+        try await eventuallyAsync("stderr retained after exit") { await provider.standardErrorTail() == diagnostic }
+        await provider.stop()
     }
 
     func testRequestTimeoutPublishesUnavailableAndSchedulesFiveSecondRetry() async throws {

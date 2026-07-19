@@ -92,12 +92,38 @@ final class PetAppKitViewTests: XCTestCase {
 
         XCTAssertTrue(petView.accessibilityPerformPress())
         XCTAssertTrue(detailHosting.isExpanded)
-        XCTAssertTrue(String(describing: type(of: try XCTUnwrap(detailHosting.expandedValue))).contains("NSHostingView"))
+        let hostedView = try XCTUnwrap(detailHosting.expandedValue)
+        XCTAssertTrue(String(describing: type(of: hostedView)).contains("NSHostingView"))
+        XCTAssertTrue(panel.hasShadow)
+        XCTAssertTrue(hostedView.wantsLayer)
+        XCTAssertEqual(hostedView.layer?.cornerRadius, 16)
+        XCTAssertEqual(hostedView.layer?.borderWidth, 1)
+        XCTAssertEqual(hostedView.layer?.backgroundColor?.alpha, 1)
 
         controller.cancelOperation(nil)
         XCTAssertFalse(detailHosting.isExpanded)
         XCTAssertNil(detailHosting.expandedValue)
         XCTAssertTrue(panel.contentView === petView)
+        XCTAssertFalse(panel.hasShadow)
+    }
+
+    func testInvalidatedControllerOrdersItsPanelOut() throws {
+        let suite = "QuotaPetTests.PetAppKitView.Release.\(UUID().uuidString)"
+        let store = try XCTUnwrap(UserDefaults(suiteName: suite))
+        store.removePersistentDomain(forName: suite)
+        defer { store.removePersistentDomain(forName: suite) }
+        let preferences = Preferences(store: store)
+        let model = AppModel(provider: UnavailableUsageProvider(message: "offline"), store: store)
+        let controller = FloatingPetController(model: model, preferences: preferences)
+        let children = Dictionary(uniqueKeysWithValues: Mirror(reflecting: controller).children.compactMap { child in
+            child.label.map { ($0, child.value) }
+        })
+        let panel = try XCTUnwrap(children["panel"] as? NSPanel)
+        XCTAssertTrue(panel.isVisible)
+
+        controller.invalidate()
+
+        XCTAssertFalse(panel.isVisible)
     }
 }
 

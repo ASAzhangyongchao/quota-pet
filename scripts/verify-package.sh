@@ -53,7 +53,7 @@ plutil -lint "$INFO_PLIST" >/dev/null
 [[ "$(plist_value "$INFO_PLIST" CFBundleExecutable)" == "QuotaPet" ]] || fail "bundle executable"
 [[ "$(plist_value "$INFO_PLIST" CFBundleIconFile)" == "AppIcon" ]] || fail "bundle icon"
 [[ "$(plist_value "$INFO_PLIST" LSUIElement)" == "true" ]] || fail "LSUIElement"
-[[ "$(plist_value "$INFO_PLIST" CFBundleShortVersionString)" == "0.1.0" ]] || fail "short version"
+[[ "$(plist_value "$INFO_PLIST" CFBundleShortVersionString)" == "0.1.1" ]] || fail "short version"
 [[ "$(plist_value "$INFO_PLIST" LSMinimumSystemVersion)" == "13.0" ]] || fail "minimum macOS"
 
 for key in \

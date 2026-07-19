@@ -85,7 +85,7 @@ final class FloatingPetController: NSObject, NSWindowDelegate {
     private var animationResetWork: DispatchWorkItem?
     private var animationGeneration = AnimationResetGeneration()
 
-    init(model: AppModel, preferences: Preferences) {
+    init(model: AppModel, preferences: Preferences, connectionOffer: CodexConnectionOffer? = nil) {
         self.model = model
         self.preferences = preferences
         detailsViewModel = UsageDetailsViewModel(snapshot: model.snapshot)
@@ -102,6 +102,7 @@ final class FloatingPetController: NSObject, NSWindowDelegate {
             return NSHostingView(rootView: UsagePopoverView(
                 viewModel: self.detailsViewModel,
                 onPetTap: { [weak self] in self?.collapseDetail() },
+                connectionOffer: connectionOffer,
                 onRefresh: { [weak self] in Task { await self?.model.refresh() } }
             ))
         }
@@ -140,6 +141,11 @@ final class FloatingPetController: NSObject, NSWindowDelegate {
         preferences.petVisible = true
         applyPreferences()
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    func invalidate() {
+        panel.delegate = nil
+        panel.orderOut(nil)
     }
 
     func windowDidMove(_ notification: Notification) { savePosition() }
@@ -192,9 +198,11 @@ final class FloatingPetController: NSObject, NSWindowDelegate {
     }
     private func expandDetail() {
         guard detailState.detailVisible else { return }
-        panel.setContentSize(NSSize(width: 280, height: 240))
+        let expandedSize = NSSize(width: 280, height: 280)
+        panel.setContentSize(expandedSize)
         let hostedView = detailHosting.expand()
-        hostedView.frame = NSRect(origin: .zero, size: panel.contentView?.bounds.size ?? NSSize(width: 280, height: 240))
+        hostedView.frame = NSRect(origin: .zero, size: panel.contentView?.bounds.size ?? expandedSize)
+        applyExpandedCardAppearance(to: hostedView)
         panel.contentView = hostedView
     }
 
@@ -204,6 +212,17 @@ final class FloatingPetController: NSObject, NSWindowDelegate {
         panel.setContentSize(FloatingPetPanelContract.default.size)
         installCollapsedView()
         detailHosting.collapse()
+        panel.hasShadow = false
+    }
+
+    private func applyExpandedCardAppearance(to view: NSView) {
+        view.wantsLayer = true
+        view.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+        view.layer?.cornerRadius = 16
+        view.layer?.borderWidth = 1
+        view.layer?.borderColor = NSColor.separatorColor.cgColor
+        view.layer?.masksToBounds = true
+        panel.hasShadow = true
     }
 
     private func scheduleIdleBlink() {
