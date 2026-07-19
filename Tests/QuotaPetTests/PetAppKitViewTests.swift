@@ -101,7 +101,10 @@ final class PetAppKitViewTests: XCTestCase {
         let hostedView = try XCTUnwrap(detailHosting.expandedValue)
         let detailContainer = try XCTUnwrap(hostedView as? DetailGlowContainerView)
         XCTAssertFalse(panel.hasShadow)
-        XCTAssertEqual(detailContainer.materialView.material, .hudWindow)
+        let expectedMaterial: NSVisualEffectView.Material = NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency
+            ? .windowBackground
+            : .hudWindow
+        XCTAssertEqual(detailContainer.materialView.material, expectedMaterial)
         XCTAssertEqual(detailContainer.materialView.blendingMode, .behindWindow)
         XCTAssertEqual(detailContainer.materialView.state, .active)
         XCTAssertTrue(detailContainer.materialView.wantsLayer)
