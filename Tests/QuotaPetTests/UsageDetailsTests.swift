@@ -26,9 +26,9 @@ final class UsageDetailsTests: XCTestCase {
 
         XCTAssertEqual(details.primaryText, "剩余 82% · 已用 18%")
         XCTAssertEqual(details.windows.first?.durationText, "5小时")
-        XCTAssertEqual(details.windows.first?.resetText, "重置时间：2026年7月20日 09:00")
+        XCTAssertEqual(details.windows.first?.resetText, "重置于 2026年7月20日 09:00")
         XCTAssertEqual(details.statusText, "数据已过期：连接中断")
-        XCTAssertEqual(details.updatedText, "数据更新：2026年7月19日 20:00")
+        XCTAssertEqual(details.updatedText, "更新于 2026年7月19日 20:00")
         XCTAssertEqual(details.windows.first?.countdownText, "距重置 2小时")
     }
 
@@ -52,7 +52,9 @@ final class UsageDetailsTests: XCTestCase {
             calendar: calendar
         )
 
-        XCTAssertEqual(details.windows.map(\.name), ["Codex 用量 1", "Codex 用量 2"])
+        XCTAssertEqual(details.windows.map(\.name), ["Codex 主额度", "其他 Codex 额度"])
+        XCTAssertNil(details.windows.first?.noteText)
+        XCTAssertEqual(details.windows.last?.noteText, "服务端未提供公开名称")
         XCTAssertEqual(details.windows.first?.countdownText, "距重置 6天")
         XCTAssertNil(details.windows.first?.durationText)
     }

@@ -66,6 +66,7 @@ public struct PetRenderState: Equatable {
     public let dashedRing: Bool
     public let palette: PetPalette
     public let staleOpacity: Double
+    public let remainingPercentText: String
     public let accessibilityLabel: String
     public let accessibilityValue: String
 
@@ -92,6 +93,7 @@ public struct PetRenderState: Equatable {
                 usedFraction: Self.clamp(window.usedPercent) / 100,
                 dashedRing: false,
                 staleOpacity: isStale ? 0.55 : 1,
+                remainingPercentText: "\(Int(remaining.rounded()))%",
                 accessibilityValue: "剩余 \(Int(remaining.rounded()))%" + (isStale ? "，数据已过期" : "")
             )
         }
@@ -102,12 +104,14 @@ public struct PetRenderState: Equatable {
         usedFraction: Double?,
         dashedRing: Bool,
         staleOpacity: Double,
+        remainingPercentText: String,
         accessibilityValue: String
     ) {
         self.mood = mood
         self.usedFraction = usedFraction
         self.dashedRing = dashedRing
         self.staleOpacity = staleOpacity
+        self.remainingPercentText = remainingPercentText
         self.accessibilityLabel = mood.accessibilityLabel
         self.accessibilityValue = accessibilityValue
 
@@ -162,6 +166,7 @@ public struct PetRenderState: Equatable {
         usedFraction: nil,
         dashedRing: true,
         staleOpacity: 1,
+        remainingPercentText: "--",
         accessibilityValue: "剩余数据不可用"
     )
 

@@ -17,6 +17,52 @@ final class InteractionViewModelTests: XCTestCase {
         XCTAssertEqual(details.presentation.primaryText, "剩余 30% · 已用 70%")
         XCTAssertEqual(details.updateCount, 1)
     }
+
+    func testRefreshFeedbackOnlyReportsSuccessAfterAReadySnapshotArrives() {
+        let details = UsageDetailsViewModel(snapshot: makeSnapshot(used: 10))
+
+        details.beginRefresh()
+        XCTAssertEqual(details.refreshFeedback, .refreshing)
+
+        details.update(QuotaSnapshot(
+            planType: nil,
+            windows: [],
+            updatedAt: .now,
+            state: .loading
+        ))
+        XCTAssertEqual(details.refreshFeedback, .refreshing)
+
+        details.update(makeSnapshot(used: 20))
+        XCTAssertEqual(details.refreshFeedback, .succeeded)
+    }
+
+    func testRefreshFeedbackReportsFailureForUnavailableSnapshot() {
+        let details = UsageDetailsViewModel(snapshot: makeSnapshot(used: 10))
+
+        details.beginRefresh()
+        details.update(QuotaSnapshot(
+            planType: nil,
+            windows: [],
+            updatedAt: .now,
+            state: .unavailable("连接失败")
+        ))
+
+        XCTAssertEqual(details.refreshFeedback, .failed)
+    }
+
+    func testSuccessfulRefreshReturnsToPetAfterFeedbackDelay() async throws {
+        let details = UsageDetailsViewModel(
+            snapshot: makeSnapshot(used: 10),
+            successFeedbackDurationNanoseconds: 10_000_000
+        )
+
+        details.beginRefresh()
+        details.update(makeSnapshot(used: 20))
+        XCTAssertEqual(details.refreshFeedback, .succeeded)
+
+        try await Task.sleep(nanoseconds: 40_000_000)
+        XCTAssertEqual(details.refreshFeedback, .idle)
+    }
 }
 
 private func makeSnapshot(used: Double) -> QuotaSnapshot {

@@ -1,5 +1,6 @@
 import AppKit
 import Combine
+import QuartzCore
 import SwiftUI
 
 enum FloatingPetLevelName: Equatable { case normal, floating }
@@ -66,6 +67,50 @@ struct AnimationResetGeneration {
 }
 
 @MainActor
+final class GlassDetailContainerView: NSVisualEffectView {
+    let hostedView: NSView
+    private let cornerMask = CAShapeLayer()
+
+    init(hostedView: NSView) {
+        self.hostedView = hostedView
+        super.init(frame: .zero)
+        material = .hudWindow
+        blendingMode = .behindWindow
+        state = .active
+        wantsLayer = true
+        layer?.cornerRadius = 22
+        layer?.cornerCurve = .continuous
+        layer?.borderWidth = 1
+        layer?.borderColor = NSColor.white.withAlphaComponent(0.22).cgColor
+        layer?.masksToBounds = true
+        layer?.mask = cornerMask
+
+        hostedView.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(hostedView)
+        NSLayoutConstraint.activate([
+            hostedView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            hostedView.trailingAnchor.constraint(equalTo: trailingAnchor),
+            hostedView.topAnchor.constraint(equalTo: topAnchor),
+            hostedView.bottomAnchor.constraint(equalTo: bottomAnchor),
+        ])
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override func layout() {
+        super.layout()
+        cornerMask.frame = bounds
+        cornerMask.path = CGPath(
+            roundedRect: bounds,
+            cornerWidth: 22,
+            cornerHeight: 22,
+            transform: nil
+        )
+    }
+}
+
+@MainActor
 final class FloatingPetController: NSObject, NSWindowDelegate {
     private let model: AppModel
     private let preferences: Preferences
@@ -99,12 +144,13 @@ final class FloatingPetController: NSObject, NSWindowDelegate {
         )
         detailHosting = ExpandableConstruction { [weak self] in
             guard let self else { return NSView() }
-            return NSHostingView(rootView: UsagePopoverView(
+            let hostingView = NSHostingView(rootView: UsagePopoverView(
                 viewModel: self.detailsViewModel,
                 onPetTap: { [weak self] in self?.collapseDetail() },
                 connectionOffer: connectionOffer,
                 onRefresh: { [weak self] in Task { await self?.model.refresh() } }
             ))
+            return GlassDetailContainerView(hostedView: hostingView)
         }
         configurePanel()
         installCollapsedView()
@@ -164,8 +210,11 @@ final class FloatingPetController: NSObject, NSWindowDelegate {
     }
 
     private func installCollapsedView() {
-        petView.frame = NSRect(origin: .zero, size: FloatingPetPanelContract.default.size)
+        // Replace the intrinsic-size SwiftUI detail first. Otherwise its constraints can
+        // prevent setContentSize from shrinking the panel and stretch the pet to 320 pt.
         panel.contentView = petView
+        panel.setContentSize(FloatingPetPanelContract.default.size)
+        petView.frame = NSRect(origin: .zero, size: FloatingPetPanelContract.default.size)
     }
 
     private func applyPreferences() {
@@ -198,31 +247,22 @@ final class FloatingPetController: NSObject, NSWindowDelegate {
     }
     private func expandDetail() {
         guard detailState.detailVisible else { return }
-        let expandedSize = NSSize(width: 280, height: 280)
+        let expandedSize = NSSize(width: 320, height: 354)
         panel.setContentSize(expandedSize)
         let hostedView = detailHosting.expand()
         hostedView.frame = NSRect(origin: .zero, size: panel.contentView?.bounds.size ?? expandedSize)
-        applyExpandedCardAppearance(to: hostedView)
         panel.contentView = hostedView
+        panel.hasShadow = true
+        restorePosition()
     }
 
     private func collapseDetail() {
         pendingDetailWork?.cancel()
         detailState.tapDetailPet()
-        panel.setContentSize(FloatingPetPanelContract.default.size)
         installCollapsedView()
         detailHosting.collapse()
         panel.hasShadow = false
-    }
-
-    private func applyExpandedCardAppearance(to view: NSView) {
-        view.wantsLayer = true
-        view.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
-        view.layer?.cornerRadius = 16
-        view.layer?.borderWidth = 1
-        view.layer?.borderColor = NSColor.separatorColor.cgColor
-        view.layer?.masksToBounds = true
-        panel.hasShadow = true
+        restorePosition()
     }
 
     private func scheduleIdleBlink() {

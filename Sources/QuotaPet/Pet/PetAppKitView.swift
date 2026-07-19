@@ -187,7 +187,37 @@ private enum PetAppKitDrawing {
                 context.strokePath()
             }
         }
+        drawRemainingBadge(state.remainingPercentText, in: context, size: size)
         context.restoreGState()
+    }
+
+    private static func drawRemainingBadge(_ text: String, in context: CGContext, size: CGSize) {
+        let scale = min(size.width, size.height) / 72
+        let badgeRect = CGRect(
+            x: size.width / 2 - 14 * scale,
+            y: size.height / 2 + 13 * scale,
+            width: 28 * scale,
+            height: 13 * scale
+        )
+        let badgePath = CGPath(roundedRect: badgeRect, cornerWidth: 6.5 * scale, cornerHeight: 6.5 * scale, transform: nil)
+        context.addPath(badgePath)
+        context.setFillColor(NSColor.black.withAlphaComponent(0.24).cgColor)
+        context.fillPath()
+
+        let font = NSFont.monospacedDigitSystemFont(ofSize: 8.5 * scale, weight: .semibold)
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.alignment = .center
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: font,
+            .foregroundColor: NSColor.white,
+            .paragraphStyle: paragraph,
+        ]
+        let attributed = NSAttributedString(string: text, attributes: attributes)
+        attributed.draw(
+            with: badgeRect.insetBy(dx: 1.5 * scale, dy: 1.2 * scale),
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            context: nil
+        )
     }
 }
 

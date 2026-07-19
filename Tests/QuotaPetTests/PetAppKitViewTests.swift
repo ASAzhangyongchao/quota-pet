@@ -1,4 +1,5 @@
 import AppKit
+import SwiftUI
 import XCTest
 @testable import QuotaPet
 
@@ -93,17 +94,25 @@ final class PetAppKitViewTests: XCTestCase {
         XCTAssertTrue(petView.accessibilityPerformPress())
         XCTAssertTrue(detailHosting.isExpanded)
         let hostedView = try XCTUnwrap(detailHosting.expandedValue)
-        XCTAssertTrue(String(describing: type(of: hostedView)).contains("NSHostingView"))
+        let glassView = try XCTUnwrap(hostedView as? GlassDetailContainerView)
         XCTAssertTrue(panel.hasShadow)
-        XCTAssertTrue(hostedView.wantsLayer)
-        XCTAssertEqual(hostedView.layer?.cornerRadius, 16)
-        XCTAssertEqual(hostedView.layer?.borderWidth, 1)
-        XCTAssertEqual(hostedView.layer?.backgroundColor?.alpha, 1)
+        XCTAssertEqual(glassView.material, .hudWindow)
+        XCTAssertEqual(glassView.blendingMode, .behindWindow)
+        XCTAssertEqual(glassView.state, .active)
+        XCTAssertTrue(glassView.wantsLayer)
+        XCTAssertEqual(glassView.layer?.cornerRadius, 22)
+        XCTAssertEqual(glassView.layer?.borderWidth, 1)
+        XCTAssertTrue(glassView.hostedView is NSHostingView<UsagePopoverView>)
+        glassView.layoutSubtreeIfNeeded()
+        XCTAssertNotNil(glassView.layer?.mask)
+        XCTAssertEqual(glassView.layer?.mask?.frame, glassView.bounds)
 
         controller.cancelOperation(nil)
         XCTAssertFalse(detailHosting.isExpanded)
         XCTAssertNil(detailHosting.expandedValue)
         XCTAssertTrue(panel.contentView === petView)
+        XCTAssertEqual(panel.contentLayoutRect.size, FloatingPetPanelContract.default.size)
+        XCTAssertEqual(petView.frame.size, FloatingPetPanelContract.default.size)
         XCTAssertFalse(panel.hasShadow)
     }
 
