@@ -28,7 +28,7 @@ enum QuotaParser {
             .first(where: { !$0.isEmpty }) ?? []
 
         let state: ConnectionState = parsedWindows.isEmpty
-            ? .unavailable("未返回 Codex 用量窗口")
+            ? .unavailable(L10n.text(.errorNoUsageWindows))
             : .ready
         return QuotaSnapshot(planType: planType, windows: parsedWindows, updatedAt: updatedAt, state: state)
     }

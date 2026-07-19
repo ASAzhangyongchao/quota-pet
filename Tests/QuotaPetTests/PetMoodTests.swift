@@ -16,7 +16,7 @@ final class PetMoodTests: XCTestCase {
     }
 
     func testRenderStateClampsRealQuotaValues() {
-        let state = PetRenderState(snapshot: snapshot(used: 130, remaining: 130, state: .ready))
+        let state = PetRenderState(snapshot: snapshot(used: 130, remaining: 130, state: .ready), language: .simplifiedChinese)
 
         XCTAssertEqual(state.mood, .thriving)
         XCTAssertEqual(state.usedFraction, 1)
@@ -34,7 +34,7 @@ final class PetMoodTests: XCTestCase {
             .unavailable("未连接"),
             .incompatible("版本不兼容"),
         ] {
-            let state = PetRenderState(snapshot: snapshot(used: 20, remaining: 80, state: connectionState))
+            let state = PetRenderState(snapshot: snapshot(used: 20, remaining: 80, state: connectionState), language: .simplifiedChinese)
 
             XCTAssertEqual(state.mood, .offline)
             XCTAssertNil(state.usedFraction)
@@ -44,13 +44,20 @@ final class PetMoodTests: XCTestCase {
     }
 
     func testStaleUsesLastRealRemainingWithReducedOpacity() {
-        let state = PetRenderState(snapshot: snapshot(used: 72, remaining: 28, state: .stale("连接中断")))
+        let state = PetRenderState(snapshot: snapshot(used: 72, remaining: 28, state: .stale("连接中断")), language: .simplifiedChinese)
 
         XCTAssertEqual(state.mood, .concerned)
         XCTAssertEqual(state.usedFraction, 0.72)
         XCTAssertEqual(state.staleOpacity, 0.55)
         XCTAssertFalse(state.dashedRing)
         XCTAssertEqual(state.accessibilityValue, "剩余 28%，数据已过期")
+    }
+
+    func testEnglishAccessibilityIsAvailable() {
+        let state = PetRenderState(snapshot: snapshot(used: 72, remaining: 28, state: .ready), language: .english)
+
+        XCTAssertEqual(state.accessibilityLabel, "Low quota")
+        XCTAssertEqual(state.accessibilityValue, "Remaining 28%")
     }
 
     func testAnimationOnlySchedulesBoundedOneShotEvents() {

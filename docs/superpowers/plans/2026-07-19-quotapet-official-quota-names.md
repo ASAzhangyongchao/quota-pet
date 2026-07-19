@@ -151,7 +151,7 @@ Run the command from Step 2 and expect zero failures.
 
 **Files:**
 - Verify all changed source, resource, test, documentation, and packaging files
-- Update gitlink: `/Users/zhangyongchao/knowledge-system/apps/QuotaPet`
+- Update the parent knowledge-system repository's `apps/QuotaPet` gitlink
 
 - [ ] **Step 1: Run all tests and real read-only Codex integration**
 

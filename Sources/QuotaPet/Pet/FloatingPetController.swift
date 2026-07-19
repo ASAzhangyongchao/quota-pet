@@ -18,6 +18,38 @@ struct FloatingPetInteractionState: Equatable {
     mutating func recoverForMenuOrHotKey() { ignoresMouseEvents = false; visible = true }
 }
 
+struct FloatingPanelGeometry {
+    static func topLeft(of frame: CGRect) -> CGPoint {
+        CGPoint(x: frame.minX, y: frame.maxY)
+    }
+
+    static func resizedFrame(from frame: CGRect, to size: CGSize, within visibleFrame: CGRect) -> CGRect {
+        let anchor = topLeft(of: frame)
+        let resized = CGRect(
+            x: anchor.x,
+            y: anchor.y - size.height,
+            width: size.width,
+            height: size.height
+        )
+        return clamped(frame: resized, within: visibleFrame)
+    }
+
+    static func clamped(frame: CGRect, within visibleFrame: CGRect) -> CGRect {
+        let maximumX = max(visibleFrame.minX, visibleFrame.maxX - frame.width)
+        let maximumY = max(visibleFrame.minY, visibleFrame.maxY - frame.height)
+        return CGRect(
+            x: min(max(frame.minX, visibleFrame.minX), maximumX),
+            y: min(max(frame.minY, visibleFrame.minY), maximumY),
+            width: frame.width,
+            height: frame.height
+        )
+    }
+
+    static func displayFrame(containing point: CGPoint, from displayFrames: [CGRect]) -> CGRect? {
+        displayFrames.first { $0.contains(point) }
+    }
+}
+
 enum PetDetailTapResult: Equatable { case playThenExpand, expandImmediately }
 struct PetDetailInteractionState: Equatable {
     private(set) var detailVisible = false
@@ -129,6 +161,9 @@ final class FloatingPetController: NSObject, NSWindowDelegate {
     private var pendingDetailWork: DispatchWorkItem?
     private var animationResetWork: DispatchWorkItem?
     private var animationGeneration = AnimationResetGeneration()
+    private var moveClampWork: DispatchWorkItem?
+    private var isCorrectingFrame = false
+    private let expandedSize = NSSize(width: 320, height: 354)
 
     init(model: AppModel, preferences: Preferences, connectionOffer: CodexConnectionOffer? = nil) {
         self.model = model
@@ -178,6 +213,7 @@ final class FloatingPetController: NSObject, NSWindowDelegate {
         idleWorkItem?.cancel()
         pendingDetailWork?.cancel()
         animationResetWork?.cancel()
+        moveClampWork?.cancel()
         if let screenObserver { NotificationCenter.default.removeObserver(screenObserver) }
         if let reduceMotionObserver { NotificationCenter.default.removeObserver(reduceMotionObserver) }
     }
@@ -194,7 +230,10 @@ final class FloatingPetController: NSObject, NSWindowDelegate {
         panel.orderOut(nil)
     }
 
-    func windowDidMove(_ notification: Notification) { savePosition() }
+    func windowDidMove(_ notification: Notification) {
+        guard !isCorrectingFrame else { return }
+        scheduleMoveCompletionClamp()
+    }
     func windowShouldClose(_ sender: NSWindow) -> Bool { panel.orderOut(nil); return false }
     func cancelOperation(_ sender: Any?) { collapseDetail() }
 
@@ -225,7 +264,7 @@ final class FloatingPetController: NSObject, NSWindowDelegate {
             cancelAnimationAndIdle()
         }
         if preferences.petVisible {
-            restorePosition()
+            if !panel.isVisible { restorePosition() }
             panel.orderFrontRegardless()
             scheduleIdleBlink()
         } else {
@@ -247,22 +286,25 @@ final class FloatingPetController: NSObject, NSWindowDelegate {
     }
     private func expandDetail() {
         guard detailState.detailVisible else { return }
-        let expandedSize = NSSize(width: 320, height: 354)
-        panel.setContentSize(expandedSize)
+        let previousFrame = panel.frame
+        let visibleFrame = currentScreen(for: previousFrame)?.visibleFrame ?? previousFrame
         let hostedView = detailHosting.expand()
-        hostedView.frame = NSRect(origin: .zero, size: panel.contentView?.bounds.size ?? expandedSize)
+        hostedView.frame = NSRect(origin: .zero, size: expandedSize)
         panel.contentView = hostedView
         panel.hasShadow = true
-        restorePosition()
+        setPanelFrame(FloatingPanelGeometry.resizedFrame(from: previousFrame, to: expandedSize, within: visibleFrame))
     }
 
     private func collapseDetail() {
         pendingDetailWork?.cancel()
+        let previousFrame = panel.frame
+        let visibleFrame = currentScreen(for: previousFrame)?.visibleFrame ?? previousFrame
         detailState.tapDetailPet()
         installCollapsedView()
         detailHosting.collapse()
         panel.hasShadow = false
-        restorePosition()
+        setPanelFrame(FloatingPanelGeometry.resizedFrame(from: previousFrame, to: FloatingPetPanelContract.default.size, within: visibleFrame))
+        savePosition()
     }
 
     private func scheduleIdleBlink() {
@@ -311,8 +353,57 @@ final class FloatingPetController: NSObject, NSWindowDelegate {
         guard let position = preferences.normalizedPosition else { return }
         let screen = NSScreen.screens.first { $0.localizedName == position.screenIdentifier } ?? NSScreen.main
         guard let screen else { return }
-        panel.setFrameOrigin(position.panelOrigin(panelSize: panel.frame.size, visibleFrame: screen.visibleFrame))
+        let origin = position.panelOrigin(panelSize: panel.frame.size, visibleFrame: screen.visibleFrame)
+        setPanelFrame(FloatingPanelGeometry.clamped(frame: CGRect(origin: origin, size: panel.frame.size), within: screen.visibleFrame))
     }
 
-    private func clampToScreen() { restorePosition(); savePosition() }
+    private func clampToScreen() {
+        clampCurrentFrame()
+        savePosition()
+    }
+
+    private func clampCurrentFrame(preferPointerDisplay: Bool = false) {
+        let preferredPoint = preferPointerDisplay ? NSEvent.mouseLocation : nil
+        guard let screen = currentScreen(for: panel.frame, preferredPoint: preferredPoint) else { return }
+        let clamped = FloatingPanelGeometry.clamped(frame: panel.frame, within: screen.visibleFrame)
+        guard clamped != panel.frame else { return }
+        setPanelFrame(clamped)
+    }
+
+    private func setPanelFrame(_ frame: CGRect) {
+        isCorrectingFrame = true
+        panel.setFrame(frame, display: true)
+        isCorrectingFrame = false
+    }
+
+    private func currentScreen(for frame: CGRect, preferredPoint: CGPoint? = nil) -> NSScreen? {
+        if let preferredPoint,
+           let displayFrame = FloatingPanelGeometry.displayFrame(containing: preferredPoint, from: NSScreen.screens.map(\.frame)),
+           let screen = NSScreen.screens.first(where: { $0.frame == displayFrame }) {
+            return screen
+        }
+        if let screen = panel.screen { return screen }
+        return NSScreen.screens.max { lhs, rhs in
+            lhs.frame.intersection(frame).area < rhs.frame.intersection(frame).area
+        } ?? NSScreen.main
+    }
+
+    private func scheduleMoveCompletionClamp() {
+        moveClampWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            if NSEvent.pressedMouseButtons != 0 {
+                self.scheduleMoveCompletionClamp()
+                return
+            }
+            self.clampCurrentFrame(preferPointerDisplay: true)
+            self.savePosition()
+        }
+        moveClampWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(80), execute: work)
+    }
+}
+
+private extension CGRect {
+    var area: CGFloat { isNull ? 0 : width * height }
 }

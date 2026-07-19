@@ -7,7 +7,7 @@ final class SettingsWindowController: NSWindowController {
         let view = SettingsView(preferences: preferences, candidates: candidates, onConfirm: onConfirm, onRegisterHotKey: onRegisterHotKey, onSetLaunchAtLogin: onSetLaunchAtLogin)
         let hosting = NSHostingController(rootView: view)
         let window = NSWindow(contentViewController: hosting)
-        window.title = "QuotaPet 设置"
+        window.title = L10n.text(.settingsTitle)
         window.setContentSize(NSSize(width: 420, height: 370))
         super.init(window: window)
     }
@@ -23,36 +23,36 @@ private struct SettingsView: View {
     let onSetLaunchAtLogin: (Bool) -> Void
     var body: some View {
         Form {
-            Toggle("显示桌宠", isOn: $preferences.petVisible)
-            Toggle("始终置顶", isOn: $preferences.alwaysOnTop)
-            Toggle("鼠标穿透", isOn: $preferences.ignoresMouseEvents)
+            Toggle(L10n.text(.settingsShowPet), isOn: $preferences.petVisible)
+            Toggle(L10n.text(.settingsAlwaysOnTop), isOn: $preferences.alwaysOnTop)
+            Toggle(L10n.text(.settingsMousePassthrough), isOn: $preferences.ignoresMouseEvents)
             VStack(alignment: .leading, spacing: 4) {
-                Picker("连接模式", selection: $preferences.connectionMode) { Text("实时").tag(ConnectionMode.realtime); Text("节能").tag(ConnectionMode.energySaver) }.pickerStyle(.segmented)
-                Text("新安装默认节能；需要持续更新时可手动切换到实时。")
+                Picker(L10n.text(.settingsConnectionMode), selection: $preferences.connectionMode) { Text(L10n.text(.settingsRealtime)).tag(ConnectionMode.realtime); Text(L10n.text(.settingsEnergySaver)).tag(ConnectionMode.energySaver) }.pickerStyle(.segmented)
+                Text(L10n.text(.settingsModeHelp))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-            HStack { Text("快捷键：⌥⌘U"); if let message = preferences.hotKeyStatusMessage { Text(message).foregroundStyle(.red) } }
-            Button("恢复默认⌥⌘U并重新注册") { preferences.hotKey = .optionCommandU; onRegisterHotKey() }
-            Toggle("本地用量通知", isOn: $preferences.notificationsEnabled)
-            Toggle("登录时启动", isOn: Binding(
+            HStack { Text(L10n.text(.settingsShortcut)); if let message = preferences.hotKeyStatusMessage { Text(message).foregroundStyle(.red) } }
+            Button(L10n.text(.settingsResetShortcut)) { preferences.hotKey = .optionCommandU; onRegisterHotKey() }
+            Toggle(L10n.text(.settingsNotifications), isOn: $preferences.notificationsEnabled)
+            Toggle(L10n.text(.settingsLaunchAtLogin), isOn: Binding(
                 get: { preferences.launchAtLoginEnabled },
                 set: onSetLaunchAtLogin
             ))
             if let message = preferences.launchAtLoginErrorMessage {
                 Text(message).font(.caption).foregroundStyle(.red)
             }
-            Section("Codex 信任") {
+            Section(L10n.text(.settingsCodexTrust)) {
                 ForEach(Array(candidates.enumerated()), id: \.offset) { _, resolution in
                     VStack(alignment: .leading) {
                         if let candidate = resolution.candidate {
                             Text(candidate.inputURL.path).font(.caption)
-                            Text("owner \(candidate.ownerUID) · mode \(String(candidate.mode, radix: 8)) · signing \(candidate.signingIdentifier ?? "无") · team \(candidate.teamIdentifier ?? "无") · hash \(candidate.codeHash.prefix(12))").font(.caption2)
+                            Text(L10n.text(.settingsCandidateDetails, arguments: [candidate.ownerUID, String(candidate.mode, radix: 8), candidate.signingIdentifier ?? L10n.text(.settingsNone), candidate.teamIdentifier ?? L10n.text(.settingsNone), String(candidate.codeHash.prefix(12))])).font(.caption2)
                             if resolution.requiresConfirmation {
-                                Text("请核对路径和签名后再授权执行。").font(.caption2).foregroundStyle(.secondary)
-                                Button("我已核对路径和签名，确认并启用") { onConfirm(candidate) }
-                            } else { Text("已信任").font(.caption).foregroundStyle(.green) }
-                        } else if case let .rejected(error) = resolution { Text("已拒绝：\(String(describing: error))").font(.caption).foregroundStyle(.red) }
+                                Text(L10n.text(.settingsReviewTrust)).font(.caption2).foregroundStyle(.secondary)
+                                Button(L10n.text(.settingsConfirmTrust)) { onConfirm(candidate) }
+                            } else { Text(L10n.text(.settingsTrusted)).font(.caption).foregroundStyle(.green) }
+                        } else if case let .rejected(error) = resolution { Text(L10n.text(.settingsRejected, arguments: [error.localizedMessage()])).font(.caption).foregroundStyle(.red) }
                     }
                 }
             }

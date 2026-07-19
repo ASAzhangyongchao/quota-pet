@@ -37,8 +37,13 @@ jobs:
             exit 1
           }
           PLIST_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' Resources/Info.plist)"
+          FILE_VERSION="$(sed -n '1p' VERSION)"
           [[ "$PLIST_VERSION" == "$VERSION" ]] || {
             echo "Release tag and Info.plist version differ." >&2
+            exit 1
+          }
+          [[ "$FILE_VERSION" == "$VERSION" ]] || {
+            echo "Release tag and VERSION file differ." >&2
             exit 1
           }
           git describe --tags --exact-match "$GITHUB_SHA" >/dev/null

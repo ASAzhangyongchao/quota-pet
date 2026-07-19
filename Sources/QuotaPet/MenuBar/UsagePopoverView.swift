@@ -19,12 +19,14 @@ final class UsageDetailsViewModel: ObservableObject {
     @Published private(set) var refreshFeedback: RefreshFeedbackState = .idle
     private(set) var updateCount = 0
     private let successFeedbackDurationNanoseconds: UInt64
+    let language: AppLanguage
     private var feedbackResetTask: Task<Void, Never>?
 
-    init(snapshot: QuotaSnapshot, successFeedbackDurationNanoseconds: UInt64 = 1_000_000_000) {
+    init(snapshot: QuotaSnapshot, language: AppLanguage = .current, successFeedbackDurationNanoseconds: UInt64 = 1_000_000_000) {
         self.snapshot = snapshot
+        self.language = language
         self.successFeedbackDurationNanoseconds = successFeedbackDurationNanoseconds
-        presentation = UsageDetailsPresentation(snapshot: snapshot)
+        presentation = UsageDetailsPresentation(snapshot: snapshot, language: language)
     }
 
     func beginRefresh() {
@@ -34,7 +36,7 @@ final class UsageDetailsViewModel: ObservableObject {
 
     func update(_ snapshot: QuotaSnapshot) {
         self.snapshot = snapshot
-        presentation = UsageDetailsPresentation(snapshot: snapshot)
+        presentation = UsageDetailsPresentation(snapshot: snapshot, language: language)
         updateCount += 1
         guard refreshFeedback == .refreshing else { return }
         switch snapshot.state {
@@ -68,7 +70,7 @@ struct UsageDetailsPresentation: Equatable {
         let durationText: String?
         let resetText: String
         let countdownText: String
-        var summaryText: String { "\(usedText)\(durationText.map { " · \($0)周期" } ?? "")" }
+        let summaryText: String
     }
 
     enum StatusKind: Equatable {
@@ -84,41 +86,45 @@ struct UsageDetailsPresentation: Equatable {
     let statusKind: StatusKind
     let connectionActionTitle: String?
 
-    init(snapshot: QuotaSnapshot, now: Date = .now, calendar: Calendar = .current) {
+    init(snapshot: QuotaSnapshot, now: Date = .now, calendar: Calendar = .current, language: AppLanguage = .current) {
         let formatter = DateFormatter()
         formatter.calendar = calendar
-        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.locale = language.locale
         formatter.timeZone = calendar.timeZone
-        formatter.dateFormat = "yyyy年M月d日 HH:mm"
+        formatter.dateFormat = language == .simplifiedChinese ? "yyyy年M月d日 HH:mm" : "MMM d, yyyy HH:mm"
 
         let primary = snapshot.primary
-        primaryText = primary.map { "剩余 \(Int($0.remainingPercent.rounded()))% · 已用 \(Int($0.usedPercent.rounded()))%" } ?? "用量暂不可用"
-        connectionActionTitle = primary == nil ? "确认并读取用量" : nil
+        primaryText = primary.map {
+            L10n.text(.remainingUsedSummary, language: language, arguments: [Int($0.remainingPercent.rounded()), Int($0.usedPercent.rounded())])
+        } ?? L10n.text(.usageUnavailable, language: language)
+        connectionActionTitle = primary == nil ? L10n.text(.confirmAndReadUsage, language: language) : nil
         windows = snapshot.windows.map { window in
-            let reset = window.resetsAt.map { "重置于 \(formatter.string(from: $0))" } ?? "未提供重置时间"
-            let countdown = window.resetsAt.map { Self.countdown(until: $0, now: now) } ?? "距重置时间未提供"
-            let duration = window.windowDurationMinutes.map(Self.durationText(minutes:))
-            let display = Self.displayInfo(for: window)
+            let reset = window.resetsAt.map { L10n.text(.resetAt, language: language, arguments: [formatter.string(from: $0)]) } ?? L10n.text(.resetUnavailable, language: language)
+            let countdown = window.resetsAt.map { Self.countdown(until: $0, now: now, language: language) } ?? L10n.text(.resetCountdownUnavailable, language: language)
+            let duration = window.windowDurationMinutes.map { Self.durationText(minutes: $0, language: language) }
+            let display = Self.displayInfo(for: window, language: language)
+            let used = L10n.text(.usedPercent, language: language, arguments: [Int(window.usedPercent.rounded())])
             return Window(
                 name: display.name,
                 noteText: display.note,
-                usedText: "已用 \(Int(window.usedPercent.rounded()))%",
-                remainingText: "剩余 \(Int(window.remainingPercent.rounded()))%",
+                usedText: used,
+                remainingText: L10n.text(.remainingPercent, language: language, arguments: [Int(window.remainingPercent.rounded())]),
                 durationText: duration,
                 resetText: reset,
-                countdownText: countdown
+                countdownText: countdown,
+                summaryText: duration.map { L10n.text(.cycleSummary, language: language, arguments: [used, $0]) } ?? used
             )
         }
-        updatedText = snapshot.windows.isEmpty ? nil : "更新于 \(formatter.string(from: snapshot.updatedAt))"
+        updatedText = snapshot.windows.isEmpty ? nil : L10n.text(.updatedAt, language: language, arguments: [formatter.string(from: snapshot.updatedAt)])
         switch snapshot.state {
         case .ready:
-            statusText = "数据正常"
+            statusText = L10n.text(.dataHealthy, language: language)
             statusKind = .healthy
         case .loading:
-            statusText = "正在读取 Codex 用量"
+            statusText = L10n.text(.readingUsage, language: language)
             statusKind = .loading
         case let .stale(message):
-            statusText = "数据已过期：\(message)"
+            statusText = L10n.text(.dataStale, language: language, arguments: [message])
             statusKind = .warning
         case let .unavailable(message), let .incompatible(message):
             statusText = message
@@ -126,32 +132,31 @@ struct UsageDetailsPresentation: Equatable {
         }
     }
 
-    private static func countdown(until date: Date, now: Date) -> String {
+    private static func countdown(until date: Date, now: Date, language: AppLanguage) -> String {
         let remainingSeconds = max(date.timeIntervalSince(now), 0)
         if remainingSeconds >= 24 * 60 * 60 {
-            return "距重置 \(Int(ceil(remainingSeconds / (24 * 60 * 60))))天"
+            return L10n.text(.countdownDays, language: language, arguments: [Int(ceil(remainingSeconds / (24 * 60 * 60)))])
         }
         if remainingSeconds >= 60 * 60 {
-            return "距重置 \(Int(ceil(remainingSeconds / (60 * 60))))小时"
+            return L10n.text(.countdownHours, language: language, arguments: [Int(ceil(remainingSeconds / (60 * 60)))])
         }
-        return "距重置 \(Int(ceil(remainingSeconds / 60)))分钟"
+        return L10n.text(.countdownMinutes, language: language, arguments: [Int(ceil(remainingSeconds / 60))])
     }
 
-    private static func durationText(minutes: Int) -> String {
-        if minutes % (24 * 60) == 0 { return "\(minutes / (24 * 60))天" }
-        if minutes % 60 == 0 { return "\(minutes / 60)小时" }
-        return "\(minutes)分钟"
+    private static func durationText(minutes: Int, language: AppLanguage) -> String {
+        if minutes % (24 * 60) == 0 { return L10n.text(.durationDays, language: language, arguments: [minutes / (24 * 60)]) }
+        if minutes % 60 == 0 { return L10n.text(.durationHours, language: language, arguments: [minutes / 60]) }
+        return L10n.text(.durationMinutes, language: language, arguments: [minutes])
     }
 
-    private static func displayInfo(for window: QuotaWindow) -> (name: String, note: String?) {
-        let internalNames = ["primary", "secondary"]
-        guard internalNames.contains(window.displayName.lowercased()) else {
-            return (window.displayName, nil)
-        }
+    private static func displayInfo(for window: QuotaWindow, language: AppLanguage) -> (name: String, note: String?) {
         if window.bucketID == "codex" {
-            return ("Codex 主额度", nil)
+            return (L10n.text(.generalUsageLimit, language: language), nil)
         }
-        return ("其他 Codex 额度", "服务端未提供公开名称")
+        if window.bucketID == "codex_bengalfox" {
+            return (L10n.text(.sparkUsageLimit, language: language), nil)
+        }
+        return (window.displayName, nil)
     }
 }
 
@@ -184,12 +189,12 @@ struct UsagePopoverView: View {
                         RefreshAvatar(feedback: viewModel.refreshFeedback, snapshot: viewModel.snapshot)
                     }
                     .buttonStyle(.plain)
-                    .accessibilityLabel("收起用量详情")
+                    .accessibilityLabel(L10n.text(.collapseDetails, language: viewModel.language))
                 } else {
                     RefreshAvatar(feedback: viewModel.refreshFeedback, snapshot: viewModel.snapshot)
                 }
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Codex 用量")
+                    Text(L10n.text(.codexUsage, language: viewModel.language))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     Text(presentation.primaryText)
@@ -222,13 +227,13 @@ struct UsagePopoverView: View {
 
             if let title = presentation.connectionActionTitle, let connectionOffer {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("将读取：\(connectionOffer.displayPath)")
+                    Text(L10n.text(.willReadPath, language: viewModel.language, arguments: [connectionOffer.displayPath]))
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                         .lineLimit(2)
                         .textSelection(.enabled)
                     Button(title, action: connectionOffer.confirm)
-                        .accessibilityLabel("确认并读取本机 Codex 用量")
+                        .accessibilityLabel(L10n.text(.confirmLocalCodex, language: viewModel.language))
                 }
             }
 
@@ -257,9 +262,9 @@ struct UsagePopoverView: View {
 
     private var refreshButtonTitle: String {
         switch viewModel.refreshFeedback {
-        case .idle, .failed: "立即刷新"
-        case .refreshing: "刷新中…"
-        case .succeeded: "刷新成功"
+        case .idle, .failed: L10n.text(.refreshNow, language: viewModel.language)
+        case .refreshing: L10n.text(.refreshing, language: viewModel.language)
+        case .succeeded: L10n.text(.refreshSucceeded, language: viewModel.language)
         }
     }
 }

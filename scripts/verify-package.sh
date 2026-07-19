@@ -53,7 +53,10 @@ plutil -lint "$INFO_PLIST" >/dev/null
 [[ "$(plist_value "$INFO_PLIST" CFBundleExecutable)" == "QuotaPet" ]] || fail "bundle executable"
 [[ "$(plist_value "$INFO_PLIST" CFBundleIconFile)" == "AppIcon" ]] || fail "bundle icon"
 [[ "$(plist_value "$INFO_PLIST" LSUIElement)" == "true" ]] || fail "LSUIElement"
-[[ "$(plist_value "$INFO_PLIST" CFBundleShortVersionString)" == "0.1.1" ]] || fail "short version"
+VERSION="$(sed -n '1p' "$PROJECT_ROOT/VERSION")"
+[[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail "VERSION format"
+[[ "$(plist_value "$INFO_PLIST" CFBundleShortVersionString)" == "$VERSION" ]] || fail "short version"
+[[ "$(plist_value "$INFO_PLIST" CFBundleVersion)" == "3" ]] || fail "build version"
 [[ "$(plist_value "$INFO_PLIST" LSMinimumSystemVersion)" == "13.0" ]] || fail "minimum macOS"
 
 for key in \
@@ -95,6 +98,8 @@ codesign --verify --deep --strict "$APP"
 cmp -s "$INFO_PLIST" "$APP/Contents/Info.plist" || fail "packaged Info.plist differs"
 [[ -x "$APP/Contents/MacOS/QuotaPet" ]] || fail "packaged executable missing"
 [[ -s "$APP/Contents/Resources/AppIcon.icns" ]] || fail "packaged icon missing"
+[[ -d "$APP/Contents/Resources/QuotaPet_QuotaPet.bundle/en.lproj" ]] || fail "English localization missing"
+[[ -d "$APP/Contents/Resources/QuotaPet_QuotaPet.bundle/zh-hans.lproj" ]] || fail "Simplified Chinese localization missing"
 unzip -tq "$ZIP" >/dev/null
 unzip -Z1 "$ZIP" >"$TEMP_ROOT/zip-contents.txt"
 grep -qx 'QuotaPet.app/Contents/Info.plist' "$TEMP_ROOT/zip-contents.txt" || fail "ZIP Info.plist missing"

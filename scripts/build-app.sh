@@ -201,11 +201,13 @@ else
     swift build -c release -Xswiftc -gnone
     BIN_DIR="$(swift build -c release -Xswiftc -gnone --show-bin-path)"
     [[ -x "$BIN_DIR/QuotaPet" ]] || { echo "Release executable was not produced" >&2; exit 1; }
+    [[ -d "$BIN_DIR/QuotaPet_QuotaPet.bundle" ]] || { echo "Localization resource bundle was not produced" >&2; exit 1; }
     mkdir -p -- "$STAGED_APP/Contents/MacOS" "$STAGED_APP/Contents/Resources"
     install -m 0755 "$BIN_DIR/QuotaPet" "$STAGED_APP/Contents/MacOS/QuotaPet"
     strip -S -x "$STAGED_APP/Contents/MacOS/QuotaPet"
     install -m 0644 Resources/Info.plist "$STAGED_APP/Contents/Info.plist"
     install -m 0644 Resources/AppIcon.icns "$STAGED_APP/Contents/Resources/AppIcon.icns"
+    ditto "$BIN_DIR/QuotaPet_QuotaPet.bundle" "$STAGED_APP/Contents/Resources/QuotaPet_QuotaPet.bundle"
     codesign --force --deep --sign - "$STAGED_APP"
     codesign --verify --deep --strict "$STAGED_APP"
     ditto -c -k --sequesterRsrc --keepParent "$STAGED_APP" "$STAGED_ZIP"

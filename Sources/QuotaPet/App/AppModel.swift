@@ -182,7 +182,7 @@ final class AppComposition {
         if let trustedCandidate {
             provider = CodexAppServerStdioProvider(candidate: trustedCandidate, resolver: resolver, sessionFactory: sessionFactory)
         } else {
-            provider = UnavailableUsageProvider(message: "未找到已信任的 Codex 可执行文件")
+            provider = UnavailableUsageProvider(message: L10n.text(.errorNoTrustedCodex))
         }
         model = AppModel(provider: provider, store: store)
     }

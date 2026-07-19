@@ -18,7 +18,7 @@ final class CodexAppServerStdioProviderTests: XCTestCase {
         XCTAssertEqual(factory.executables, [testCandidate().canonicalURL])
         XCTAssertEqual(factory.arguments, [["app-server", "--stdio"]])
         XCTAssertEqual(try session.method(at: 0), "initialize")
-        XCTAssertEqual(try session.params(at: 0) as? [String: [String: String]], ["clientInfo": ["name": "quota_pet", "title": "QuotaPet", "version": "0.1.1"]])
+        XCTAssertEqual(try session.params(at: 0) as? [String: [String: String]], ["clientInfo": ["name": "quota_pet", "title": "QuotaPet", "version": "0.1.2"]])
 
         session.reply(id: 1, result: [:])
         try await eventually("initialized notification") { session.messages.count >= 2 }
@@ -57,7 +57,7 @@ final class CodexAppServerStdioProviderTests: XCTestCase {
         let snapshots = SnapshotRecorder(stream: provider.snapshots)
 
         await provider.start(mode: .realtime)
-        try await eventually("untrusted snapshot") { snapshots.values.contains { $0.state == .incompatible("Codex executable trust validation failed") } }
+        try await eventually("untrusted snapshot") { snapshots.values.contains { $0.state == .incompatible(L10n.text(.errorTrustValidation)) } }
         XCTAssertEqual(factory.sessions.count, 0)
     }
 
@@ -103,7 +103,7 @@ final class CodexAppServerStdioProviderTests: XCTestCase {
         let snapshots = SnapshotRecorder(stream: provider.snapshots)
         await provider.start(mode: .realtime)
         let session = try await completeHandshake(factory: factory, response: ["unexpected": true])
-        try await eventually("invalid response state") { snapshots.values.contains { $0.state == .unavailable("未返回 Codex 用量窗口") } }
+        try await eventually("invalid response state") { snapshots.values.contains { $0.state == .unavailable(L10n.text(.errorNoUsageWindows)) } }
         XCTAssertTrue(scheduler.delays.contains(5))
 
         await provider.refresh()
@@ -289,7 +289,7 @@ final class CodexAppServerStdioProviderTests: XCTestCase {
         session.standardError(Data(repeating: 65, count: 1024) + suffix)
         try await eventuallyAsync("stderr tail") { await provider.standardErrorTail() == suffix }
         session.standardOutput(Data("not json\n".utf8))
-        try await eventually("malformed stdout state") { snapshots.values.contains { $0.state == .unavailable("Codex app-server response was invalid") } }
+        try await eventually("malformed stdout state") { snapshots.values.contains { $0.state == .unavailable(L10n.text(.errorInvalidAppServerResponse)) } }
         session.notify(method: "account/rateLimits/updated", params: validRateLimits())
         try await eventually("valid frame after malformed stdout") { snapshots.values.last?.state == .ready }
         try await stop(provider, session: session)
@@ -307,7 +307,7 @@ final class CodexAppServerStdioProviderTests: XCTestCase {
         try await eventuallyAsync("stderr received") { await provider.standardErrorTail() == diagnostic }
         session.exit()
 
-        try await eventually("unexpected exit observed") { snapshots.values.last?.state == .unavailable("Codex app-server exited") }
+        try await eventually("unexpected exit observed") { snapshots.values.last?.state == .unavailable(L10n.text(.errorAppServerExited)) }
         try await eventuallyAsync("stderr retained after exit") { await provider.standardErrorTail() == diagnostic }
         await provider.stop()
     }
@@ -319,7 +319,7 @@ final class CodexAppServerStdioProviderTests: XCTestCase {
         let snapshots = SnapshotRecorder(stream: provider.snapshots)
         await provider.start(mode: .realtime)
 
-        try await eventually("request timeout") { snapshots.values.contains { $0.state == .unavailable("Codex app-server request timed out") } }
+        try await eventually("request timeout") { snapshots.values.contains { $0.state == .unavailable(L10n.text(.errorRequestTimedOut)) } }
         try await eventually("timeout force fallback") { scheduler.tasks(withDelay: 1).count == 1 }
         scheduler.tasks(withDelay: 1)[0].fire()
         try await eventually("retry after timeout process exit") { scheduler.delays.contains(5) }

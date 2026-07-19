@@ -106,11 +106,11 @@ final class LocalNotificationController {
 
     func deliver(_ notification: QuotaNotification) {
         let content = UNMutableNotificationContent()
-        content.title = "QuotaPet 用量提醒"
+        content.title = L10n.text(.notificationTitle)
         if notification.threshold == 0 {
-            content.body = "本地读取的剩余额度已用尽。"
+            content.body = L10n.text(.notificationExhausted)
         } else {
-            content.body = "本地读取的剩余额度已降至 \(notification.threshold)% 或以下。"
+            content.body = L10n.text(.notificationThreshold, arguments: [notification.threshold])
         }
         content.sound = .default
         center.add(UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil))

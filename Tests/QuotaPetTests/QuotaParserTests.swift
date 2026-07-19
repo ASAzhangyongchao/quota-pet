@@ -103,7 +103,7 @@ final class QuotaParserTests: XCTestCase {
             planType: nil,
             windows: [],
             updatedAt: snapshot.updatedAt,
-            state: .unavailable("未返回 Codex 用量窗口")
+            state: .unavailable(L10n.text(.errorNoUsageWindows))
         ))
     }
 
@@ -115,7 +115,7 @@ final class QuotaParserTests: XCTestCase {
                 ],
             ],
         ])
-        XCTAssertEqual(unavailable.state, .unavailable("未返回 Codex 用量窗口"))
+        XCTAssertEqual(unavailable.state, .unavailable(L10n.text(.errorNoUsageWindows)))
 
         let snapshot = try parse([
             "rateLimitsByLimitId": [

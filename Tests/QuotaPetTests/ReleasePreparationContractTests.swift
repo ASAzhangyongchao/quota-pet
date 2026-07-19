@@ -64,6 +64,8 @@ final class ReleasePreparationContractTests: XCTestCase {
             "spctl", "lipo \"$BIN_DIR/QuotaPet\" -verify_arch arm64 x86_64",
             "lipo \"$APP/Contents/MacOS/QuotaPet\" -verify_arch arm64 x86_64",
             "plutil -replace CFBundleShortVersionString",
+            "QuotaPet_QuotaPet.bundle",
+            "ditto \"$BIN_DIR/QuotaPet_QuotaPet.bundle\" \"$APP/Contents/Resources/QuotaPet_QuotaPet.bundle\"",
             "trap cleanup EXIT", "trap 'exit 130' INT", "trap 'exit 143' TERM",
             "QuotaPet-$VERSION.zip", "QuotaPet-$VERSION.dmg",
         ] {
@@ -122,6 +124,35 @@ final class ReleasePreparationContractTests: XCTestCase {
             "notarytool", "Gatekeeper", "SBOM", "attestation", "Homebrew",
         ] {
             XCTAssertTrue(combined.localizedCaseInsensitiveContains(required), "Missing release documentation: \(required)")
+        }
+    }
+
+    func testEnglishAndChineseDocumentationAreIndependentAndComplete() throws {
+        let requiredPaths = [
+            "README.md", "README.zh-CN.md",
+            "docs/USER_GUIDE.md", "docs/USER_GUIDE.zh-CN.md",
+            "CHANGELOG.md", "CHANGELOG.zh-CN.md",
+            "docs/RELEASING.md", "docs/RELEASING.zh-CN.md",
+        ]
+        let documents = try Dictionary(uniqueKeysWithValues: requiredPaths.map { path in
+            (path, try XCTUnwrap(requiredContents(of: path)))
+        })
+
+        XCTAssertTrue(documents["README.md"]?.contains("README.zh-CN.md") == true)
+        XCTAssertTrue(documents["README.zh-CN.md"]?.contains("README.md") == true)
+        XCTAssertTrue(documents["docs/USER_GUIDE.md"]?.contains("After installation") == false)
+        XCTAssertTrue(documents["docs/USER_GUIDE.md"]?.contains("First launch") == true)
+        XCTAssertTrue(documents["docs/USER_GUIDE.md"]?.contains("Updating") == true)
+        XCTAssertTrue(documents["docs/USER_GUIDE.md"]?.contains("Uninstall") == true)
+        XCTAssertTrue(documents["docs/USER_GUIDE.zh-CN.md"]?.contains("第一次打开") == true)
+        XCTAssertTrue(documents["docs/USER_GUIDE.zh-CN.md"]?.contains("更新") == true)
+        XCTAssertTrue(documents["docs/USER_GUIDE.zh-CN.md"]?.contains("卸载") == true)
+        XCTAssertTrue(documents["CHANGELOG.md"]?.contains("[0.1.2] - Unreleased") == true)
+        XCTAssertTrue(documents["CHANGELOG.zh-CN.md"]?.contains("[0.1.2] - 尚未发布") == true)
+
+        let releasePair = (documents["docs/RELEASING.md"] ?? "") + (documents["docs/RELEASING.zh-CN.md"] ?? "")
+        for marker in ["Semantic Versioning", "GitHub", "Homebrew", "Rollback", "Developer ID", "notarytool", "SHA256", "attest"] {
+            XCTAssertTrue(releasePair.localizedCaseInsensitiveContains(marker), "Missing bilingual release marker: \(marker)")
         }
     }
 

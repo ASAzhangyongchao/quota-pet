@@ -7,7 +7,7 @@ final class InteractionViewModelTests: XCTestCase {
         let first = makeSnapshot(used: 10)
         let second = makeSnapshot(used: 70)
         let pet = PetViewModel(snapshot: first)
-        let details = UsageDetailsViewModel(snapshot: first)
+        let details = UsageDetailsViewModel(snapshot: first, language: .simplifiedChinese)
         let identity = ObjectIdentifier(details)
         pet.update(second)
         details.update(second)

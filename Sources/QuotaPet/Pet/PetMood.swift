@@ -70,13 +70,13 @@ public struct PetRenderState: Equatable {
     public let accessibilityLabel: String
     public let accessibilityValue: String
 
-    init(snapshot: QuotaSnapshot) {
+    init(snapshot: QuotaSnapshot, language: AppLanguage = .current) {
         switch snapshot.state {
         case .loading, .unavailable, .incompatible:
-            self = Self.offline
+            self = Self.offline(language: language)
         case .ready, .stale:
             guard let window = snapshot.primary else {
-                self = Self.offline
+                self = Self.offline(language: language)
                 return
             }
 
@@ -94,7 +94,8 @@ public struct PetRenderState: Equatable {
                 dashedRing: false,
                 staleOpacity: isStale ? 0.55 : 1,
                 remainingPercentText: "\(Int(remaining.rounded()))%",
-                accessibilityValue: "剩余 \(Int(remaining.rounded()))%" + (isStale ? "，数据已过期" : "")
+                accessibilityLabel: mood.accessibilityLabel(language: language),
+                accessibilityValue: L10n.text(isStale ? .accessibilityRemainingStale : .accessibilityRemaining, language: language, arguments: [Int(remaining.rounded())])
             )
         }
     }
@@ -105,6 +106,7 @@ public struct PetRenderState: Equatable {
         dashedRing: Bool,
         staleOpacity: Double,
         remainingPercentText: String,
+        accessibilityLabel: String,
         accessibilityValue: String
     ) {
         self.mood = mood
@@ -112,7 +114,7 @@ public struct PetRenderState: Equatable {
         self.dashedRing = dashedRing
         self.staleOpacity = staleOpacity
         self.remainingPercentText = remainingPercentText
-        self.accessibilityLabel = mood.accessibilityLabel
+        self.accessibilityLabel = accessibilityLabel
         self.accessibilityValue = accessibilityValue
 
         switch mood {
@@ -161,14 +163,17 @@ public struct PetRenderState: Equatable {
         }
     }
 
-    private static let offline = PetRenderState(
-        mood: .offline,
-        usedFraction: nil,
-        dashedRing: true,
-        staleOpacity: 1,
-        remainingPercentText: "--",
-        accessibilityValue: "剩余数据不可用"
-    )
+    private static func offline(language: AppLanguage) -> PetRenderState {
+        PetRenderState(
+            mood: .offline,
+            usedFraction: nil,
+            dashedRing: true,
+            staleOpacity: 1,
+            remainingPercentText: "--",
+            accessibilityLabel: PetMood.offline.accessibilityLabel(language: language),
+            accessibilityValue: L10n.text(.accessibilityRemainingUnavailable, language: language)
+        )
+    }
 
     private static func clamp(_ value: Double) -> Double { min(max(value, 0), 100) }
 }
@@ -242,14 +247,14 @@ struct PetAnimationGate {
 }
 
 private extension PetMood {
-    var accessibilityLabel: String {
+    func accessibilityLabel(language: AppLanguage) -> String {
         switch self {
-        case .thriving: "额度充足"
-        case .content: "正常"
-        case .concerned: "注意"
-        case .critical: "即将耗尽"
-        case .sleeping: "等待重置"
-        case .offline: "离线"
+        case .thriving: L10n.text(.moodThriving, language: language)
+        case .content: L10n.text(.moodContent, language: language)
+        case .concerned: L10n.text(.moodConcerned, language: language)
+        case .critical: L10n.text(.moodCritical, language: language)
+        case .sleeping: L10n.text(.moodSleeping, language: language)
+        case .offline: L10n.text(.moodOffline, language: language)
         }
     }
 }

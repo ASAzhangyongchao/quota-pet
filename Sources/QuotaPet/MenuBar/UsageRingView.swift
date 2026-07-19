@@ -16,7 +16,7 @@ struct UsageRingStyle: Equatable {
     let staleOpacity: CGFloat
     let accessibilityLabel: String
 
-    init(snapshot: QuotaSnapshot, lineWidth: CGFloat = 2.4) {
+    init(snapshot: QuotaSnapshot, lineWidth: CGFloat = 2.4, language: AppLanguage = .current) {
         self.lineWidth = lineWidth
         startAngle = -.pi / 2
 
@@ -35,7 +35,7 @@ struct UsageRingStyle: Equatable {
             colorSemantic = .unavailable
             isDashed = true
             staleOpacity = 1
-            accessibilityLabel = "Codex 用量暂不可用"
+            accessibilityLabel = L10n.text(.ringUnavailable, language: language)
             return
         }
 
@@ -45,7 +45,7 @@ struct UsageRingStyle: Equatable {
             colorSemantic = .unavailable
             isDashed = true
             staleOpacity = 1
-            accessibilityLabel = "Codex 用量暂不可用"
+            accessibilityLabel = L10n.text(.ringUnavailable, language: language)
             return
         }
 
@@ -55,17 +55,17 @@ struct UsageRingStyle: Equatable {
         colorSemantic = semantic
         isDashed = false
         staleOpacity = opacity
-        accessibilityLabel = Self.accessibilityLabel(for: window)
+        accessibilityLabel = Self.accessibilityLabel(for: window, language: language)
     }
 
-    private static func accessibilityLabel(for window: QuotaWindow) -> String {
+    private static func accessibilityLabel(for window: QuotaWindow, language: AppLanguage) -> String {
         let remaining = Int(window.remainingPercent.rounded())
-        guard let reset = window.resetsAt else { return "Codex 剩余 \(remaining)%" }
+        guard let reset = window.resetsAt else { return L10n.text(.ringRemaining, language: language, arguments: [remaining]) }
         let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "zh_CN")
-        formatter.timeZone = TimeZone(identifier: "Asia/Shanghai")
-        formatter.dateFormat = "M月d日"
-        return "Codex 剩余 \(remaining)%，\(formatter.string(from: reset))重置"
+        formatter.locale = language.locale
+        formatter.timeZone = .current
+        formatter.dateFormat = language == .simplifiedChinese ? "M月d日" : "MMM d"
+        return L10n.text(.ringRemainingReset, language: language, arguments: [remaining, formatter.string(from: reset)])
     }
 }
 

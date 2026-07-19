@@ -45,6 +45,7 @@ final class Preferences: ObservableObject {
     }
 
     private let store: any AppPreferenceStoring
+    private let language: AppLanguage
     @Published var petVisible: Bool { didSet { store.set(petVisible, forKey: Key.petVisible) } }
     @Published var alwaysOnTop: Bool { didSet { store.set(alwaysOnTop, forKey: Key.alwaysOnTop) } }
     @Published var ignoresMouseEvents: Bool { didSet { store.set(ignoresMouseEvents, forKey: Key.ignoresMouseEvents) } }
@@ -57,8 +58,9 @@ final class Preferences: ObservableObject {
     @Published var normalizedPosition: NormalizedScreenPosition? { didSet { persist(normalizedPosition, key: Key.position) } }
     @Published var confirmedFingerprints: Set<TrustFingerprint> { didSet { persist(confirmedFingerprints, key: Key.fingerprints) } }
 
-    init(store: any AppPreferenceStoring = UserDefaults.standard) {
+    init(store: any AppPreferenceStoring = UserDefaults.standard, language: AppLanguage = .current) {
         self.store = store
+        self.language = language
         petVisible = store.object(forKey: Key.petVisible) as? Bool ?? true
         alwaysOnTop = store.object(forKey: Key.alwaysOnTop) as? Bool ?? true
         ignoresMouseEvents = store.object(forKey: Key.ignoresMouseEvents) as? Bool ?? false
@@ -75,8 +77,8 @@ final class Preferences: ObservableObject {
     func setHotKeyRegistration(_ result: Result<Void, GlobalHotKeyError>) {
         switch result {
         case .success: hotKeyStatusMessage = nil
-        case .failure(.occupied): hotKeyStatusMessage = "快捷键已被其他应用占用"
-        case .failure: hotKeyStatusMessage = "快捷键注册失败，请使用菜单栏入口"
+        case .failure(.occupied): hotKeyStatusMessage = L10n.text(.hotkeyOccupied, language: language)
+        case .failure: hotKeyStatusMessage = L10n.text(.hotkeyRegistrationFailed, language: language)
         }
     }
 

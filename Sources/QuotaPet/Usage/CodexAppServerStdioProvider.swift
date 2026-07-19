@@ -338,7 +338,7 @@ private actor UsageCoordinator {
         let currentGeneration = generation
         guard resolver.revalidate(candidate) else {
             connecting = false
-            publishState(.incompatible("Codex executable trust validation failed"))
+            publishState(.incompatible(L10n.text(.errorTrustValidation)))
             scheduleRetry()
             return
         }
@@ -369,7 +369,7 @@ private actor UsageCoordinator {
             connecting = false
             handshaking = true
             _ = try await client.request(method: "initialize", params: [
-                "clientInfo": ["name": "quota_pet", "title": "QuotaPet", "version": "0.1.1"],
+                "clientInfo": ["name": "quota_pet", "title": "QuotaPet", "version": "0.1.2"],
             ])
             guard connection?.generation == currentGeneration else { return }
             try await client.sendInitialized(params: [:])
@@ -400,7 +400,7 @@ private actor UsageCoordinator {
         do {
             try await connection.client.receive(data)
         } catch {
-            publishState(.unavailable("Codex app-server response was invalid"))
+            publishState(.unavailable(L10n.text(.errorInvalidAppServerResponse)))
             scheduleRetry()
         }
     }
@@ -429,7 +429,7 @@ private actor UsageCoordinator {
         handshaking = false
         reading = false
         await exited.client.cancelPending()
-        publishState(.unavailable("Codex app-server exited"))
+        publishState(.unavailable(L10n.text(.errorAppServerExited)))
         scheduleRetry()
     }
 
@@ -445,7 +445,7 @@ private actor UsageCoordinator {
                 scheduleRetry()
             }
         } catch {
-            publishState(.unavailable("Invalid Codex usage response"))
+            publishState(.unavailable(L10n.text(.errorInvalidUsageResponse)))
             scheduleRetry()
         }
     }
@@ -458,9 +458,9 @@ private actor UsageCoordinator {
         reading = false
         let state: ConnectionState
         if let error = error as? CodexRPCClientError, error == .requestTimedOut {
-            state = .unavailable("Codex app-server request timed out")
+            state = .unavailable(L10n.text(.errorRequestTimedOut))
         } else {
-            state = .unavailable("Codex app-server request failed")
+            state = .unavailable(L10n.text(.errorRequestFailed))
         }
         publishState(state)
         if shouldClose { await closeConnection() }

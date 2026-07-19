@@ -30,7 +30,7 @@ final class GlobalHotKeyTests: XCTestCase {
     func testPreferencesExposeChineseRegistrationFailureAndClearItOnSuccess() {
         let preferences = Preferences(store: makeStore())
         preferences.setHotKeyRegistration(.failure(.occupied))
-        XCTAssertEqual(preferences.hotKeyStatusMessage, "快捷键已被其他应用占用")
+        XCTAssertEqual(preferences.hotKeyStatusMessage, L10n.text(.hotkeyOccupied))
         preferences.setHotKeyRegistration(.success(()))
         XCTAssertNil(preferences.hotKeyStatusMessage)
     }

@@ -56,11 +56,15 @@ plutil -lint Resources/Info.plist >/dev/null
 swift build -c release --arch arm64 --arch x86_64 -Xswiftc -gnone
 BIN_DIR="$(swift build -c release --arch arm64 --arch x86_64 -Xswiftc -gnone --show-bin-path)"
 [[ -x "$BIN_DIR/QuotaPet" ]] || fail "Universal release executable was not produced"
+[[ -d "$BIN_DIR/QuotaPet_QuotaPet.bundle" ]] || fail "Localization resource bundle was not produced"
 lipo "$BIN_DIR/QuotaPet" -verify_arch arm64 x86_64
 
 install -m 0755 "$BIN_DIR/QuotaPet" "$APP/Contents/MacOS/QuotaPet"
 install -m 0644 Resources/Info.plist "$APP/Contents/Info.plist"
 install -m 0644 Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
+ditto "$BIN_DIR/QuotaPet_QuotaPet.bundle" "$APP/Contents/Resources/QuotaPet_QuotaPet.bundle"
+[[ -d "$APP/Contents/Resources/QuotaPet_QuotaPet.bundle/en.lproj" ]] || fail "English localization is missing"
+[[ -d "$APP/Contents/Resources/QuotaPet_QuotaPet.bundle/zh-hans.lproj" ]] || fail "Simplified Chinese localization is missing"
 plutil -replace CFBundleShortVersionString -string "$VERSION" "$APP/Contents/Info.plist"
 
 codesign --force --sign "$SIGNING_IDENTITY" --options runtime --timestamp "$APP"

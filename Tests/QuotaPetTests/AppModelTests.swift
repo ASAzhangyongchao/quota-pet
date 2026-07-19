@@ -86,10 +86,10 @@ final class AppModelTests: XCTestCase {
         )
 
         await composition.model.start()
-        await eventually("unavailable composition snapshot") { composition.model.snapshot.state == .unavailable("未找到已信任的 Codex 可执行文件") }
+        await eventually("unavailable composition snapshot") { composition.model.snapshot.state == .unavailable(L10n.text(.errorNoTrustedCodex)) }
 
         XCTAssertEqual(factory.startCount, 0)
-        XCTAssertEqual(composition.model.snapshot.state, .unavailable("未找到已信任的 Codex 可执行文件"))
+        XCTAssertEqual(composition.model.snapshot.state, .unavailable(L10n.text(.errorNoTrustedCodex)))
     }
 
     func testCompositionExposesRequiresConfirmationCandidate() {

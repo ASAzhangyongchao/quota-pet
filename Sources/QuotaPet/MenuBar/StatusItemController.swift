@@ -10,7 +10,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     private let ringView = UsageRingView(frame: NSRect(x: 0, y: 0, width: 18, height: 18))
     private let popover = NSPopover()
     private let popoverContent: DeferredConstruction<NSViewController>
-    private let summaryField = NSTextField(labelWithString: "Codex 用量暂不可用")
+    private let summaryField = NSTextField(labelWithString: L10n.text(.ringUnavailable))
     private let detailsViewModel: UsageDetailsViewModel
     private let onSettings: () -> Void
     private let onQuit: () -> Void
@@ -106,22 +106,22 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
     private func configureMenu() {
         menu.delegate = self
-        menu.addItem(withTitle: "立即刷新", action: #selector(refresh(_:)), keyEquivalent: "").target = self
-        let pet = menu.addItem(withTitle: "显示桌宠", action: #selector(togglePet(_:)), keyEquivalent: "")
+        menu.addItem(withTitle: L10n.text(.refreshNow), action: #selector(refresh(_:)), keyEquivalent: "").target = self
+        let pet = menu.addItem(withTitle: L10n.text(.menuShowPet), action: #selector(togglePet(_:)), keyEquivalent: "")
         pet.target = self
         pet.tag = 1
-        let realtime = menu.addItem(withTitle: "实时模式", action: #selector(useRealtime(_:)), keyEquivalent: "")
+        let realtime = menu.addItem(withTitle: L10n.text(.menuRealtime), action: #selector(useRealtime(_:)), keyEquivalent: "")
         realtime.target = self
         realtime.tag = 2
-        let saver = menu.addItem(withTitle: "节能模式", action: #selector(useEnergySaver(_:)), keyEquivalent: "")
+        let saver = menu.addItem(withTitle: L10n.text(.menuEnergySaver), action: #selector(useEnergySaver(_:)), keyEquivalent: "")
         saver.target = self
         saver.tag = 3
         menu.addItem(.separator())
-        let recover = menu.addItem(withTitle: "恢复桌宠交互", action: #selector(recoverInteraction(_:)), keyEquivalent: "")
+        let recover = menu.addItem(withTitle: L10n.text(.menuRecoverInteraction), action: #selector(recoverInteraction(_:)), keyEquivalent: "")
         recover.target = self
         recover.tag = 4
-        menu.addItem(withTitle: "设置", action: #selector(showSettings(_:)), keyEquivalent: ",").target = self
-        menu.addItem(withTitle: "退出", action: #selector(quit(_:)), keyEquivalent: "q").target = self
+        menu.addItem(withTitle: L10n.text(.menuSettings), action: #selector(showSettings(_:)), keyEquivalent: ",").target = self
+        menu.addItem(withTitle: L10n.text(.menuQuit), action: #selector(quit(_:)), keyEquivalent: "q").target = self
     }
 
     private func togglePopover() {

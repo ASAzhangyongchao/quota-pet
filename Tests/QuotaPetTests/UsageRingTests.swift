@@ -32,14 +32,15 @@ final class UsageRingTests: XCTestCase {
     }
 
     func testAccessibilityIncludesChineseResetDateWhenPresent() {
-        let style = UsageRingStyle(snapshot: ringSnapshot(used: 18, state: .ready, reset: ringDate("2026-07-25T12:00:00Z")))
+        let style = UsageRingStyle(snapshot: ringSnapshot(used: 18, state: .ready, reset: ringDate("2026-07-25T12:00:00Z")), language: .simplifiedChinese)
 
         XCTAssertEqual(style.accessibilityLabel, "Codex 剩余 82%，7月25日重置")
     }
 
     func testAccessibilityOmitsResetWhenAbsentAndExplainsUnavailable() {
-        XCTAssertEqual(UsageRingStyle(snapshot: ringSnapshot(used: 18, state: .ready)).accessibilityLabel, "Codex 剩余 82%")
-        XCTAssertEqual(UsageRingStyle(snapshot: QuotaSnapshot(planType: nil, windows: [], updatedAt: .now, state: .unavailable("未连接"))).accessibilityLabel, "Codex 用量暂不可用")
+        XCTAssertEqual(UsageRingStyle(snapshot: ringSnapshot(used: 18, state: .ready), language: .simplifiedChinese).accessibilityLabel, "Codex 剩余 82%")
+        XCTAssertEqual(UsageRingStyle(snapshot: QuotaSnapshot(planType: nil, windows: [], updatedAt: .now, state: .unavailable("未连接")), language: .simplifiedChinese).accessibilityLabel, "Codex 用量暂不可用")
+        XCTAssertEqual(UsageRingStyle(snapshot: ringSnapshot(used: 18, state: .ready), language: .english).accessibilityLabel, "Codex remaining 82%")
     }
 }
 

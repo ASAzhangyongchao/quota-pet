@@ -20,9 +20,18 @@ final class PackagingContractTests: XCTestCase {
         XCTAssertEqual(plist["CFBundleExecutable"] as? String, "QuotaPet")
         XCTAssertEqual(plist["CFBundleIconFile"] as? String, "AppIcon")
         XCTAssertEqual(plist["LSUIElement"] as? Bool, true)
-        XCTAssertEqual(plist["CFBundleShortVersionString"] as? String, "0.1.1")
-        XCTAssertEqual(plist["CFBundleVersion"] as? String, "2")
+        XCTAssertEqual(plist["CFBundleShortVersionString"] as? String, "0.1.2")
+        XCTAssertEqual(plist["CFBundleVersion"] as? String, "3")
+        XCTAssertEqual(plist["CFBundleDevelopmentRegion"] as? String, "en")
+        XCTAssertEqual(plist["CFBundleLocalizations"] as? [String], ["en", "zh-Hans"])
         XCTAssertEqual(plist["LSMinimumSystemVersion"] as? String, "13.0")
+
+        let version = try String(
+            contentsOf: repositoryRoot.appendingPathComponent("VERSION"),
+            encoding: .utf8
+        ).trimmingCharacters(in: .whitespacesAndNewlines)
+        XCTAssertEqual(version, "0.1.2")
+        XCTAssertEqual(version, plist["CFBundleShortVersionString"] as? String)
 
         let forbiddenKeys = [
             "NSCameraUsageDescription",

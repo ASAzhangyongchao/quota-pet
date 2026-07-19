@@ -11,7 +11,7 @@ final class UsageDetailsTests: XCTestCase {
             state: .unavailable("未找到已信任的 Codex 可执行文件")
         )
 
-        let details = UsageDetailsPresentation(snapshot: snapshot)
+        let details = UsageDetailsPresentation(snapshot: snapshot, language: .simplifiedChinese)
 
         XCTAssertEqual(details.connectionActionTitle, "确认并读取用量")
         XCTAssertNil(details.updatedText)
@@ -22,7 +22,7 @@ final class UsageDetailsTests: XCTestCase {
         let snapshot = QuotaSnapshot(planType: "Plus", windows: [QuotaWindow(id: "codex", bucketID: "codex", displayName: "Codex", usedPercent: 18, remainingPercent: 82, windowDurationMinutes: 300, resetsAt: reset, isReached: false)], updatedAt: ISO8601DateFormatter().date(from: "2026-07-19T12:00:00Z")!, state: .stale("连接中断"))
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(secondsFromGMT: 8 * 3600)!
-        let details = UsageDetailsPresentation(snapshot: snapshot, now: ISO8601DateFormatter().date(from: "2026-07-19T23:00:00Z")!, calendar: calendar)
+        let details = UsageDetailsPresentation(snapshot: snapshot, now: ISO8601DateFormatter().date(from: "2026-07-19T23:00:00Z")!, calendar: calendar, language: .simplifiedChinese)
 
         XCTAssertEqual(details.primaryText, "剩余 82% · 已用 18%")
         XCTAssertEqual(details.windows.first?.durationText, "5小时")
@@ -49,12 +49,12 @@ final class UsageDetailsTests: XCTestCase {
         let details = UsageDetailsPresentation(
             snapshot: snapshot,
             now: ISO8601DateFormatter().date(from: "2026-07-19T12:00:00Z")!,
-            calendar: calendar
+            calendar: calendar,
+            language: .simplifiedChinese
         )
 
-        XCTAssertEqual(details.windows.map(\.name), ["Codex 主额度", "其他 Codex 额度"])
-        XCTAssertNil(details.windows.first?.noteText)
-        XCTAssertEqual(details.windows.last?.noteText, "服务端未提供公开名称")
+        XCTAssertEqual(details.windows.map(\.name), ["通用使用限额", "GPT-5.3-Codex-Spark 使用限额"])
+        XCTAssertTrue(details.windows.allSatisfy { $0.noteText == nil })
         XCTAssertEqual(details.windows.first?.countdownText, "距重置 6天")
         XCTAssertNil(details.windows.first?.durationText)
     }
@@ -71,9 +71,26 @@ final class UsageDetailsTests: XCTestCase {
             state: .ready
         )
 
-        let details = UsageDetailsPresentation(snapshot: snapshot, now: now)
+        let details = UsageDetailsPresentation(snapshot: snapshot, now: now, language: .simplifiedChinese)
 
         XCTAssertEqual(details.windows[0].countdownText, "距重置 23小时")
         XCTAssertEqual(details.windows[1].countdownText, "距重置 2天")
+    }
+
+    func testOfficialQuotaNamesHaveEnglishEquivalents() {
+        let snapshot = QuotaSnapshot(
+            planType: nil,
+            windows: [
+                QuotaWindow(id: "codex|primary", bucketID: "codex", displayName: "primary", usedPercent: 10, remainingPercent: 90, windowDurationMinutes: nil, resetsAt: nil, isReached: false),
+                QuotaWindow(id: "codex_bengalfox|primary", bucketID: "codex_bengalfox", displayName: "primary", usedPercent: 20, remainingPercent: 80, windowDurationMinutes: nil, resetsAt: nil, isReached: false),
+            ],
+            updatedAt: .now,
+            state: .ready
+        )
+
+        let details = UsageDetailsPresentation(snapshot: snapshot, language: .english)
+
+        XCTAssertEqual(details.windows.map(\.name), ["General usage limit", "GPT-5.3-Codex-Spark usage limit"])
+        XCTAssertTrue(details.windows.allSatisfy { $0.noteText == nil })
     }
 }
