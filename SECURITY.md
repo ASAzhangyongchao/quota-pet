@@ -28,6 +28,10 @@ Local builds use an ad-hoc signature only to verify bundle integrity during stag
 
 Any public binary release must use a valid Developer ID Application identity, hardened runtime, Apple notarization and stapling, checksums, provenance/attestation, and Gatekeeper verification on a clean user environment. Release credentials must remain outside the repository and CI logs.
 
+The checked-in automation is preparation-only until a `Developer ID Application` identity and all notary credentials are installed in the protected GitHub `release` environment. Missing or mismatched signing identity, certificate, API private key, key ID, issuer ID, tag version, notarization result, stapling result, Universal architecture check, or Gatekeeper assessment is a hard failure. Apple Development, Apple Distribution, and ad-hoc identities are not substitutes for Developer ID Application distribution.
+
+CI must not receive release secrets and must not enable the real Codex integration test. The tag release workflow may access environment secrets only after the `release` environment's protection rules pass. It emits versioned ZIP and DMG artifacts, literal SHA256 checksums, an SPDX SBOM, a fixed-URL/fixed-SHA Homebrew cask, and GitHub build attestations. The release remains unapproved until a clean macOS user or VM independently verifies the downloaded checksum and attestation, accepts the notarization ticket, passes Gatekeeper, and launches the app.
+
 ## Reproducible network and file-access audit
 
 Build and install the exact release candidate, launch it, and record its PID:

@@ -1,0 +1,154 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    environment: release
+    runs-on: macos-15
+    timeout-minutes: 90
+    env:
+      QUOTAPET_CODEX_INTEGRATION: "0"
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate release tag and version
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+            echo "Release tag must be vMAJOR.MINOR.PATCH." >&2
+            exit 1
+          }
+          PLIST_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' Resources/Info.plist)"
+          [[ "$PLIST_VERSION" == "$VERSION" ]] || {
+            echo "Release tag and Info.plist version differ." >&2
+            exit 1
+          }
+          git describe --tags --exact-match "$GITHUB_SHA" >/dev/null
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+
+      - name: Run tests without live Codex access
+        run: swift test --disable-sandbox
+
+      - name: Import release credentials and build notarized artifacts
+        shell: bash
+        env:
+          BUILD_CERTIFICATE_BASE64: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
+          P12_PASSWORD: ${{ secrets.P12_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+          SIGNING_IDENTITY: ${{ secrets.SIGNING_IDENTITY }}
+          APPLE_API_KEY_BASE64: ${{ secrets.APPLE_API_KEY_BASE64 }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          for name in BUILD_CERTIFICATE_BASE64 P12_PASSWORD KEYCHAIN_PASSWORD SIGNING_IDENTITY APPLE_API_KEY_BASE64 APPLE_API_KEY_ID APPLE_API_ISSUER_ID; do
+            [[ -n "${!name:-}" ]] || {
+              echo "Missing release environment prerequisite: $name" >&2
+              exit 1
+            }
+          done
+
+          KEYCHAIN_PATH="$RUNNER_TEMP/quotapet-release.keychain-db"
+          CERTIFICATE_PATH="$RUNNER_TEMP/quotapet-release.p12"
+          APPLE_API_PRIVATE_KEY="$RUNNER_TEMP/AuthKey_${APPLE_API_KEY_ID}.p8"
+          cleanup() {
+            security delete-keychain "$KEYCHAIN_PATH" >/dev/null 2>&1 || true
+            rm -f -- "$CERTIFICATE_PATH" "$APPLE_API_PRIVATE_KEY"
+          }
+          trap cleanup EXIT
+
+          printf '%s' "$BUILD_CERTIFICATE_BASE64" | /usr/bin/base64 -D > "$CERTIFICATE_PATH"
+          printf '%s' "$APPLE_API_KEY_BASE64" | /usr/bin/base64 -D > "$APPLE_API_PRIVATE_KEY"
+          chmod 600 "$CERTIFICATE_PATH" "$APPLE_API_PRIVATE_KEY"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$CERTIFICATE_PATH" -P "$P12_PASSWORD" -k "$KEYCHAIN_PATH" -T /usr/bin/codesign -T /usr/bin/security
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH" >/dev/null
+          security list-keychains -d user -s "$KEYCHAIN_PATH"
+
+          export APPLE_API_PRIVATE_KEY
+          ./scripts/sign-and-notarize.sh "$VERSION" dist/release
+
+      - name: Generate SPDX SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          file: dist/release/QuotaPet-${{ env.VERSION }}.zip
+          format: spdx-json
+          output-file: dist/release/QuotaPet-${{ env.VERSION }}.spdx.json
+          artifact-name: QuotaPet-${{ env.VERSION }}.spdx.json
+          upload-artifact: false
+          upload-release-assets: false
+
+      - name: Generate checksums and pinned Homebrew cask
+        shell: bash
+        run: |
+          set -euo pipefail
+          RELEASE_DIR="dist/release"
+          (
+            cd "$RELEASE_DIR"
+            shasum -a 256 \
+              "QuotaPet-${VERSION}.zip" \
+              "QuotaPet-${VERSION}.dmg" \
+              "QuotaPet-${VERSION}.spdx.json" > SHA256SUMS
+          )
+          DMG_SHA="$(shasum -a 256 "$RELEASE_DIR/QuotaPet-${VERSION}.dmg" | awk '{print $1}')"
+          ./scripts/update-cask.sh "$VERSION" "$DMG_SHA" "$RELEASE_DIR/quotapet.rb"
+          ruby -c "$RELEASE_DIR/quotapet.rb"
+
+      - name: Attest release artifacts
+        uses: actions/attest@v4
+        with:
+          subject-checksums: dist/release/SHA256SUMS
+
+      - name: Attest release SBOM
+        uses: actions/attest@v4
+        with:
+          subject-path: dist/release/QuotaPet-${{ env.VERSION }}.zip
+          sbom-path: dist/release/QuotaPet-${{ env.VERSION }}.spdx.json
+
+      - name: Upload verified workflow artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: QuotaPet-${{ env.VERSION }}-release
+          if-no-files-found: error
+          path: |
+            dist/release/QuotaPet-${{ env.VERSION }}.zip
+            dist/release/QuotaPet-${{ env.VERSION }}.dmg
+            dist/release/QuotaPet-${{ env.VERSION }}.spdx.json
+            dist/release/SHA256SUMS
+            dist/release/quotapet.rb
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release create "$GITHUB_REF_NAME" \
+            "dist/release/QuotaPet-${VERSION}.zip" \
+            "dist/release/QuotaPet-${VERSION}.dmg" \
+            "dist/release/QuotaPet-${VERSION}.spdx.json" \
+            "dist/release/SHA256SUMS" \
+            "dist/release/quotapet.rb" \
+            --verify-tag \
+            --title "QuotaPet ${VERSION}" \
+            --generate-notes

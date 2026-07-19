@@ -85,6 +85,28 @@ Build the app, then run `./scripts/measure-performance.sh`; realtime is the meas
 
 The same-machine empty AppKit control measured 67.938 MB median RSS, so the release gates are calibrated to main RSS <= 80 MB and main-plus-direct-Codex RSS <= 160 MB. RSS remains the release gate; physical footprint is reported only as a secondary diagnostic. See the [latest performance baseline](docs/performance-baseline.md) for all metrics, thresholds, method, and limitations.
 
+## Public release preparation / 公开发布准备
+
+The repository is preparation-only until all release prerequisites are available. Do not treat an ad-hoc build as a public release. At the time this workflow was prepared, this machine had no usable `Developer ID Application` identity, and release publication was intentionally not attempted.
+
+CI runs ordinary tests, an ad-hoc build, and package verification without repository secrets. It explicitly disables the real Codex integration test, so CI never performs an authenticated quota read. A `vMAJOR.MINOR.PATCH` tag is the only release trigger; the release job targets the protected GitHub `release` environment and fails closed before building if any signing or notarization prerequisite is absent.
+
+Configure the release environment named `release` with required reviewers, restrict it to version tags, and add these secrets only there:
+
+- `BUILD_CERTIFICATE_BASE64`, `P12_PASSWORD`, and `KEYCHAIN_PASSWORD` for a Developer ID Application certificate in a temporary keychain.
+- `SIGNING_IDENTITY`, including the full `Developer ID Application: ...` identity.
+- `APPLE_API_KEY_BASE64`, `APPLE_API_KEY_ID`, and `APPLE_API_ISSUER_ID` for `notarytool`.
+
+The release workflow builds a Universal `arm64`/`x86_64` app, enables hardened runtime and a secure timestamp, submits with `notarytool`, staples and validates both the app and DMG, and runs Gatekeeper assessment. It publishes versioned ZIP and DMG files, SHA256 checksums, an SPDX JSON SBOM, a pinned Homebrew cask, and GitHub artifact attestations. A separate clean macOS user or VM must still download the final artifacts, verify `SHA256SUMS` and the attestation, and confirm Gatekeeper launch before announcing the release.
+
+To generate the fixed-version Homebrew cask after obtaining the final DMG checksum:
+
+```bash
+./scripts/update-cask.sh 0.1.0 <64-character-dmg-sha256> /path/to/homebrew-tap/Casks/quotapet.rb
+```
+
+The cask URL is fixed to this repository's versioned GitHub Release path and the SHA256 is always literal; it never follows a `latest` URL. Do not create or push a tag until the `release` environment, Developer ID identity, notarization API key, clean-machine verification plan, and authenticated GitHub publishing access have all been confirmed.
+
 ### Notifications and login item / 通知与开机启动
 
 Notifications are opt-in and use the macOS local notification service. Each threshold is notified at most once per quota window. “Launch at login” uses `SMAppService.mainApp`; it adds no helper executable or privileged entitlement.

@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-and-package:
+    runs-on: macos-15
+    timeout-minutes: 30
+    env:
+      QUOTAPET_CODEX_INTEGRATION: "0"
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Check source and dependency hygiene
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check
+          test -s DEPENDENCIES.md
+          grep -Fq "No third-party runtime dependencies" DEPENDENCIES.md
+
+      - name: Run tests without live Codex access
+        run: swift test --disable-sandbox
+
+      - name: Build local ad-hoc package
+        run: ./scripts/build-app.sh
+
+      - name: Verify package
+        # verify-package also scans tracked and untracked source plus binary
+        # strings for private paths, credentials, tokens, and email addresses.
+        run: ./scripts/verify-package.sh
