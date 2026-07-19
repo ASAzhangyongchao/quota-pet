@@ -58,7 +58,7 @@ public struct PetRenderContract {
 public struct PetRenderState: Equatable {
     public let mood: PetMood
     public let usedFraction: Double?
-    public let eyeShape: PetEyeShape
+    public var eyeShape: PetEyeShape
     public let browShape: PetBrowShape
     public let mouthShape: PetMouthShape
     public let showsSweat: Bool
@@ -168,6 +168,14 @@ public struct PetRenderState: Equatable {
     private static func clamp(_ value: Double) -> Double { min(max(value, 0), 100) }
 }
 
+extension PetRenderState {
+    func blinking() -> PetRenderState {
+        var copy = self
+        copy.eyeShape = .closed
+        return copy
+    }
+}
+
 public enum PetAnimationEvent: Equatable {
     case stateChange
     case click
@@ -211,6 +219,21 @@ public struct PetAnimationPolicy: Equatable {
         let offset = Int((Double(range.upperBound - range.lowerBound) * unit).rounded())
         return range.lowerBound + offset
     }
+}
+
+struct PetAnimationGate {
+    private(set) var isActive = false
+
+    mutating func consume(_ event: PetAnimationEvent, reduceMotion: Bool, petVisible: Bool, connectionMode: ConnectionMode) -> PetAnimationPolicy? {
+        guard !isActive else { return nil }
+        let policy = PetAnimationPolicy(event: event, reduceMotion: reduceMotion, petVisible: petVisible, connectionMode: connectionMode)
+        guard policy.animationEnabled else { return nil }
+        isActive = true
+        return policy
+    }
+
+    mutating func complete() { isActive = false }
+    mutating func cancel() { isActive = false }
 }
 
 private extension PetMood {

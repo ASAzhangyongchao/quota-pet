@@ -28,7 +28,7 @@ struct ExecutableCandidate: Equatable {
     let inputURL: URL
 }
 
-struct TrustFingerprint: Equatable, Hashable {
+struct TrustFingerprint: Codable, Equatable, Hashable {
     let canonicalPath: String
     let codeHash: String
     let signingIdentifier: String?
@@ -289,8 +289,12 @@ final class CodexExecutableResolver {
     private var eligibleFingerprints: Set<TrustFingerprint> = []
     private var confirmedFingerprints: Set<TrustFingerprint> = []
 
-    init(inspector: any CodexExecutableInspecting = CodexStaticExecutableInspector()) {
+    init(
+        inspector: any CodexExecutableInspecting = CodexStaticExecutableInspector(),
+        confirmedFingerprints: Set<TrustFingerprint> = []
+    ) {
         self.inspector = inspector
+        self.confirmedFingerprints = confirmedFingerprints
     }
 
     static func candidateInputs(

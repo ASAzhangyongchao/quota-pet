@@ -1,5 +1,6 @@
 import AppKit
 import Combine
+import SwiftUI
 
 @MainActor
 final class StatusItemController: NSObject, NSMenuDelegate {
@@ -9,14 +10,20 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     private let ringView = UsageRingView(frame: NSRect(x: 0, y: 0, width: 18, height: 18))
     private let popover = NSPopover()
     private let summaryField = NSTextField(labelWithString: "Codex 用量暂不可用")
+    private let detailsViewModel: UsageDetailsViewModel
     private let onSettings: () -> Void
     private let onQuit: () -> Void
+    private let onRecoverInteraction: () -> Void
+    private let preferences: Preferences?
     private var snapshotSubscription: AnyCancellable?
 
-    init(model: AppModel, onSettings: @escaping () -> Void, onQuit: @escaping () -> Void) {
+    init(model: AppModel, preferences: Preferences? = nil, onSettings: @escaping () -> Void, onQuit: @escaping () -> Void, onRecoverInteraction: @escaping () -> Void = {}) {
         self.model = model
         self.onSettings = onSettings
         self.onQuit = onQuit
+        self.onRecoverInteraction = onRecoverInteraction
+        self.preferences = preferences
+        detailsViewModel = UsageDetailsViewModel(snapshot: model.snapshot)
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         super.init()
         configureStatusButton()
@@ -25,6 +32,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         snapshotSubscription = model.$snapshot.sink { [weak self] snapshot in
             self?.ringView.setSnapshot(snapshot)
             self?.summaryField.stringValue = UsageRingStyle(snapshot: snapshot).accessibilityLabel
+            self?.detailsViewModel.update(snapshot)
         }
     }
 
@@ -46,14 +54,16 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     }
 
     @objc private func togglePet(_ sender: Any?) {
-        model.togglePetVisible()
+        if let preferences { preferences.petVisible.toggle() } else { model.togglePetVisible() }
     }
 
     @objc private func useRealtime(_ sender: Any?) {
+        preferences?.connectionMode = .realtime
         Task { await model.setConnectionMode(.realtime) }
     }
 
     @objc private func useEnergySaver(_ sender: Any?) {
+        preferences?.connectionMode = .energySaver
         Task { await model.setConnectionMode(.energySaver) }
     }
 
@@ -61,15 +71,18 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         onSettings()
     }
 
+    @objc private func recoverInteraction(_ sender: Any?) { onRecoverInteraction() }
+
     @objc private func quit(_ sender: Any?) {
         onQuit()
     }
 
     func menuWillOpen(_ menu: NSMenu) {
         guard menu == self.menu else { return }
-        menu.item(withTag: 1)?.state = model.petVisible ? .on : .off
-        menu.item(withTag: 2)?.state = model.connectionMode == .realtime ? .on : .off
-        menu.item(withTag: 3)?.state = model.connectionMode == .energySaver ? .on : .off
+        menu.item(withTag: 1)?.state = (preferences?.petVisible ?? model.petVisible) ? .on : .off
+        menu.item(withTag: 2)?.state = (preferences?.connectionMode ?? model.connectionMode) == .realtime ? .on : .off
+        menu.item(withTag: 3)?.state = (preferences?.connectionMode ?? model.connectionMode) == .energySaver ? .on : .off
+        menu.item(withTag: 4)?.isHidden = !(preferences?.ignoresMouseEvents ?? false)
     }
 
     private func configureStatusButton() {
@@ -85,12 +98,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     }
 
     private func configurePopover() {
-        let controller = NSViewController()
-        let view = NSView(frame: NSRect(x: 0, y: 0, width: 220, height: 48))
-        summaryField.frame = NSRect(x: 12, y: 14, width: 196, height: 20)
-        summaryField.lineBreakMode = .byTruncatingTail
-        view.addSubview(summaryField)
-        controller.view = view
+        let controller = NSHostingController(rootView: UsagePopoverView(viewModel: detailsViewModel, onRefresh: { [weak model] in Task { await model?.refresh() } }))
         popover.behavior = .transient
         popover.contentViewController = controller
     }
@@ -108,6 +116,9 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         saver.target = self
         saver.tag = 3
         menu.addItem(.separator())
+        let recover = menu.addItem(withTitle: "恢复桌宠交互", action: #selector(recoverInteraction(_:)), keyEquivalent: "")
+        recover.target = self
+        recover.tag = 4
         menu.addItem(withTitle: "设置", action: #selector(showSettings(_:)), keyEquivalent: ",").target = self
         menu.addItem(withTitle: "退出", action: #selector(quit(_:)), keyEquivalent: "q").target = self
     }

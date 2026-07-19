@@ -11,9 +11,9 @@ final class AppModelTests: XCTestCase {
 
         await model.start()
         provider.emit(ready)
-        await drainMainActor()
+        await eventually("ready snapshot") { model.snapshot == ready }
         provider.emit(QuotaSnapshot(planType: nil, windows: [], updatedAt: .now, state: .unavailable("连接中断")))
-        await drainMainActor()
+        await eventually("stale snapshot") { model.snapshot.state == .stale("连接中断") }
 
         XCTAssertEqual(model.snapshot.planType, "Plus")
         XCTAssertEqual(model.snapshot.windows, ready.windows)
@@ -28,7 +28,7 @@ final class AppModelTests: XCTestCase {
 
         await model.start()
         provider.emit(QuotaSnapshot(planType: nil, windows: [], updatedAt: .now, state: .incompatible("尚未确认 Codex")))
-        await drainMainActor()
+        await eventually("incompatible snapshot") { model.snapshot.state == .incompatible("尚未确认 Codex") }
 
         XCTAssertTrue(model.snapshot.windows.isEmpty)
         XCTAssertNil(model.snapshot.planType)
@@ -42,12 +42,12 @@ final class AppModelTests: XCTestCase {
 
         await model.start()
         provider.emit(snapshot(used: 18, plan: "Plus", reset: nil, state: .ready))
-        await drainMainActor()
+        await eventually("initial ready snapshot") { model.snapshot.state == .ready }
         provider.emit(QuotaSnapshot(planType: nil, windows: [], updatedAt: .now, state: .unavailable("连接中断")))
-        await drainMainActor()
+        await eventually("stale snapshot") { model.snapshot.state == .stale("连接中断") }
         let recovered = snapshot(used: 31, plan: "Pro", reset: nil, state: .ready)
         provider.emit(recovered)
-        await drainMainActor()
+        await eventually("recovered snapshot") { model.snapshot == recovered }
 
         XCTAssertEqual(model.snapshot, recovered)
         XCTAssertNil(model.lastError)
@@ -86,7 +86,7 @@ final class AppModelTests: XCTestCase {
         )
 
         await composition.model.start()
-        await drainMainActor()
+        await eventually("unavailable composition snapshot") { composition.model.snapshot.state == .unavailable("未找到已信任的 Codex 可执行文件") }
 
         XCTAssertEqual(factory.startCount, 0)
         XCTAssertEqual(composition.model.snapshot.state, .unavailable("未找到已信任的 Codex 可执行文件"))
@@ -140,8 +140,12 @@ private func date(_ value: String) -> Date {
     ISO8601DateFormatter().date(from: value)!
 }
 
-private func drainMainActor() async {
-    for _ in 0..<10 { await Task.yield() }
+private func eventually(_ description: String, condition: @escaping () -> Bool) async {
+    for _ in 0..<1_000 {
+        if condition() { return }
+        await Task.yield()
+    }
+    XCTFail("等待 \(description) 超时")
 }
 
 private final class CompositionResolver: AppExecutableResolving {
