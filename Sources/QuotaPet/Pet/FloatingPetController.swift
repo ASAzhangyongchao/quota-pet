@@ -70,13 +70,15 @@ final class FloatingPetController: NSObject, NSWindowDelegate {
     private let model: AppModel
     private let preferences: Preferences
     private let panel: NSPanel
-    private let petViewModel: PetViewModel
+    private let detailsViewModel: UsageDetailsViewModel
+    private var latestRenderState: PetRenderState
+    private var petView: PetAppKitView!
+    private var detailHosting: ExpandableConstruction<NSView>!
     private var snapshotSubscription: AnyCancellable?
     private var preferencesSubscriptions = Set<AnyCancellable>()
     private var screenObserver: NSObjectProtocol?
     private var idleWorkItem: DispatchWorkItem?
     private var animationGate = PetAnimationGate()
-    private let visualState = PetInteractionVisualState()
     private var reduceMotionObserver: NSObjectProtocol?
     private var detailState = PetDetailInteractionState()
     private var pendingDetailWork: DispatchWorkItem?
@@ -86,12 +88,33 @@ final class FloatingPetController: NSObject, NSWindowDelegate {
     init(model: AppModel, preferences: Preferences) {
         self.model = model
         self.preferences = preferences
-        petViewModel = PetViewModel(snapshot: model.snapshot)
+        detailsViewModel = UsageDetailsViewModel(snapshot: model.snapshot)
+        latestRenderState = PetRenderState(snapshot: model.snapshot)
         panel = NSPanel(contentRect: NSRect(origin: .zero, size: FloatingPetPanelContract.default.size), styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         super.init()
+        petView = PetAppKitView(
+            renderState: latestRenderState,
+            onClick: { [weak self] in self?.tapPet() },
+            onHover: { [weak self] in self?.play(.hover) }
+        )
+        detailHosting = ExpandableConstruction { [weak self] in
+            guard let self else { return NSView() }
+            return NSHostingView(rootView: UsagePopoverView(
+                viewModel: self.detailsViewModel,
+                onPetTap: { [weak self] in self?.collapseDetail() },
+                onRefresh: { [weak self] in Task { await self?.model.refresh() } }
+            ))
+        }
         configurePanel()
-        installView()
-        snapshotSubscription = model.$snapshot.sink { [weak self] snapshot in self?.petViewModel.update(snapshot); self?.play(.stateChange); self?.scheduleIdleBlink() }
+        installCollapsedView()
+        snapshotSubscription = model.$snapshot.sink { [weak self] snapshot in
+            guard let self else { return }
+            self.latestRenderState = PetRenderState(snapshot: snapshot)
+            self.petView.update(renderState: self.latestRenderState)
+            self.detailsViewModel.update(snapshot)
+            self.play(.stateChange)
+            self.scheduleIdleBlink()
+        }
         Publishers.CombineLatest4(preferences.$petVisible, preferences.$alwaysOnTop, preferences.$ignoresMouseEvents, preferences.$connectionMode)
             .sink { [weak self] _, _, _, _ in self?.applyPreferences() }
             .store(in: &preferencesSubscriptions)
@@ -134,9 +157,9 @@ final class FloatingPetController: NSObject, NSWindowDelegate {
         panel.level = .floating
     }
 
-    private func installView() {
-        let root = PetContainerView(viewModel: petViewModel, visualState: visualState, detailVisible: detailState.detailVisible, onClick: { [weak self] in self?.tapPet() }, onDetailPetTap: { [weak self] in self?.collapseDetail() }, onHover: { [weak self] in self?.play(.hover) }, onRefresh: { [weak self] in Task { await self?.model.refresh() } })
-        panel.contentView = NSHostingView(rootView: root)
+    private func installCollapsedView() {
+        petView.frame = NSRect(origin: .zero, size: FloatingPetPanelContract.default.size)
+        panel.contentView = petView
     }
 
     private func applyPreferences() {
@@ -167,8 +190,21 @@ final class FloatingPetController: NSObject, NSWindowDelegate {
             DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(200), execute: work)
         }
     }
-    private func expandDetail() { guard detailState.detailVisible else { return }; panel.setContentSize(NSSize(width: 280, height: 240)); installView() }
-    private func collapseDetail() { pendingDetailWork?.cancel(); detailState.tapDetailPet(); panel.setContentSize(FloatingPetPanelContract.default.size); installView() }
+    private func expandDetail() {
+        guard detailState.detailVisible else { return }
+        panel.setContentSize(NSSize(width: 280, height: 240))
+        let hostedView = detailHosting.expand()
+        hostedView.frame = NSRect(origin: .zero, size: panel.contentView?.bounds.size ?? NSSize(width: 280, height: 240))
+        panel.contentView = hostedView
+    }
+
+    private func collapseDetail() {
+        pendingDetailWork?.cancel()
+        detailState.tapDetailPet()
+        panel.setContentSize(FloatingPetPanelContract.default.size)
+        installCollapsedView()
+        detailHosting.collapse()
+    }
 
     private func scheduleIdleBlink() {
         idleWorkItem?.cancel()
@@ -181,12 +217,13 @@ final class FloatingPetController: NSObject, NSWindowDelegate {
 
     @discardableResult private func play(_ event: PetAnimationEvent) -> Bool {
         guard let policy = animationGate.consume(event, reduceMotion: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion, petVisible: preferences.petVisible, connectionMode: preferences.connectionMode), let duration = policy.durationMilliseconds else { return false }
-        withAnimation(.easeInOut(duration: Double(duration) / 1000)) { visualState.activate(event) }
+        if event == .idleBlink { petView.update(renderState: latestRenderState.blinking()) }
+        petView.play(event: event, durationMilliseconds: duration)
         animationResetWork?.cancel()
         let generation = animationGeneration.begin()
         let reset = DispatchWorkItem { [weak self] in
             guard let self, self.animationGeneration.accepts(generation) else { return }
-            withAnimation(.easeInOut(duration: 0.12)) { self.visualState.reset() }
+            self.petView.update(renderState: self.latestRenderState)
             self.animationGate.complete()
         }
         animationResetWork = reset
@@ -194,7 +231,17 @@ final class FloatingPetController: NSObject, NSWindowDelegate {
         return true
     }
 
-    private func cancelAnimationAndIdle() { idleWorkItem?.cancel(); idleWorkItem = nil; pendingDetailWork?.cancel(); animationResetWork?.cancel(); animationGeneration.cancel(); detailState.cancelPending(); animationGate.cancel(); visualState.reset() }
+    private func cancelAnimationAndIdle() {
+        idleWorkItem?.cancel()
+        idleWorkItem = nil
+        pendingDetailWork?.cancel()
+        animationResetWork?.cancel()
+        animationGeneration.cancel()
+        detailState.cancelPending()
+        animationGate.cancel()
+        petView.cancelAnimation()
+        petView.update(renderState: latestRenderState)
+    }
 
     private func savePosition() {
         guard !detailState.detailVisible, let screen = panel.screen else { return }
@@ -209,20 +256,4 @@ final class FloatingPetController: NSObject, NSWindowDelegate {
     }
 
     private func clampToScreen() { restorePosition(); savePosition() }
-}
-
-private struct PetContainerView: View {
-    @ObservedObject var viewModel: PetViewModel
-    @ObservedObject var visualState: PetInteractionVisualState
-    let detailVisible: Bool
-    let onClick: () -> Void
-    let onDetailPetTap: () -> Void
-    let onHover: () -> Void
-    let onRefresh: () -> Void
-    var body: some View {
-        Group {
-            if detailVisible { UsagePopoverView(snapshot: viewModel.snapshot, onPetTap: onDetailPetTap, onRefresh: onRefresh) }
-            else { VectorPetView(renderState: visualState.isBlinking ? viewModel.renderState.blinking() : viewModel.renderState).scaleEffect(visualState.scale).rotationEffect(visualState.rotation).animation(.easeInOut(duration: 0.22), value: viewModel.renderState).onTapGesture(perform: onClick).onHover(perform: { if $0 { onHover() } }) }
-        }
-    }
 }

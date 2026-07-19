@@ -11,17 +11,19 @@ final class PreferencesTests: XCTestCase {
         XCTAssertTrue(preferences.petVisible)
         XCTAssertTrue(preferences.alwaysOnTop)
         XCTAssertFalse(preferences.ignoresMouseEvents)
-        XCTAssertEqual(preferences.connectionMode, .realtime)
+        XCTAssertEqual(preferences.connectionMode, .energySaver)
         XCTAssertEqual(preferences.hotKey, .optionCommandU)
         XCTAssertFalse(preferences.notificationsEnabled)
         XCTAssertFalse(preferences.launchAtLoginEnabled)
 
         preferences.petVisible = false
+        preferences.connectionMode = .realtime
         preferences.normalizedPosition = NormalizedScreenPosition(x: 1.4, y: -0.2, screenIdentifier: "display")
         preferences.confirmedFingerprints = [fingerprint()]
         let restored = Preferences(store: store)
 
         XCTAssertFalse(restored.petVisible)
+        XCTAssertEqual(restored.connectionMode, .realtime)
         XCTAssertEqual(restored.normalizedPosition, NormalizedScreenPosition(x: 1, y: 0, screenIdentifier: "display"))
         XCTAssertEqual(restored.confirmedFingerprints, [fingerprint()])
         XCTAssertNil(store.object(forKey: "QuotaPet.snapshot"))

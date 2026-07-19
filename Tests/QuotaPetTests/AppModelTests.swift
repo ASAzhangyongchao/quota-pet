@@ -58,10 +58,10 @@ final class AppModelTests: XCTestCase {
         let model = AppModel(provider: provider, store: makeStore())
 
         await model.start()
-        await model.setConnectionMode(.energySaver)
+        await model.setConnectionMode(.realtime)
 
-        XCTAssertEqual(provider.startedModes, [.realtime, .energySaver])
-        XCTAssertEqual(model.connectionMode, .energySaver)
+        XCTAssertEqual(provider.startedModes, [.energySaver, .realtime])
+        XCTAssertEqual(model.connectionMode, .realtime)
     }
 
     func testPreferencesPersistInAnIsolatedUserDefaultsSuite() async {
@@ -69,11 +69,11 @@ final class AppModelTests: XCTestCase {
         let provider = TestUsageProvider()
         let model = AppModel(provider: provider, store: store)
 
-        await model.setConnectionMode(.energySaver)
+        await model.setConnectionMode(.realtime)
         model.setPetVisible(false)
         let restored = AppModel(provider: TestUsageProvider(), store: store)
 
-        XCTAssertEqual(restored.connectionMode, .energySaver)
+        XCTAssertEqual(restored.connectionMode, .realtime)
         XCTAssertFalse(restored.petVisible)
     }
 

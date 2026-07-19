@@ -71,9 +71,9 @@ final class FoundationCodexAppServerSession: CodexAppServerSession, @unchecked S
     private let onExit: () -> Void
     private var inputClosed = false
     private var terminationQueued = false
-    private let ioQueue = DispatchQueue(label: "QuotaPet.CodexAppServerSession.io")
+    private let ioQueue: DispatchQueue
 
-    init(process: Process, input: FileHandle, output: FileHandle, error: FileHandle, onStandardOutput: @escaping (Data) -> Void, onStandardError: @escaping (Data) -> Void, onExit: @escaping () -> Void) {
+    init(process: Process, input: FileHandle, output: FileHandle, error: FileHandle, onStandardOutput: @escaping (Data) -> Void, onStandardError: @escaping (Data) -> Void, onExit: @escaping () -> Void, ioQueue: DispatchQueue = DispatchQueue(label: "QuotaPet.CodexAppServerSession.io")) {
         self.process = process
         self.input = input
         self.output = output
@@ -81,14 +81,17 @@ final class FoundationCodexAppServerSession: CodexAppServerSession, @unchecked S
         self.onStandardOutput = onStandardOutput
         self.onStandardError = onStandardError
         self.onExit = onExit
+        self.ioQueue = ioQueue
     }
 
     func installHandlers() {
         output.readabilityHandler = { [weak self] handle in
-            self?.ioQueue.async { [weak self] in self?.readAvailable(handle, deliver: self?.onStandardOutput) }
+            guard let self else { return }
+            self.consumeReadableEvent(handle, deliver: self.onStandardOutput)
         }
         error.readabilityHandler = { [weak self] handle in
-            self?.ioQueue.async { [weak self] in self?.readAvailable(handle, deliver: self?.onStandardError) }
+            guard let self else { return }
+            self.consumeReadableEvent(handle, deliver: self.onStandardError)
         }
         process.terminationHandler = { [weak self] _ in self?.finishExit() }
     }
@@ -116,13 +119,13 @@ final class FoundationCodexAppServerSession: CodexAppServerSession, @unchecked S
         if process.isRunning { kill(process.processIdentifier, SIGKILL) }
     }
 
-    private func readAvailable(_ handle: FileHandle, deliver: ((Data) -> Void)?) {
+    private func consumeReadableEvent(_ handle: FileHandle, deliver: @escaping (Data) -> Void) {
         let data = handle.availableData
         guard !data.isEmpty else {
             handle.readabilityHandler = nil
             return
         }
-        deliver?(data)
+        ioQueue.async { deliver(data) }
     }
 
     private func finishExit() {

@@ -9,6 +9,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     private let menu = NSMenu()
     private let ringView = UsageRingView(frame: NSRect(x: 0, y: 0, width: 18, height: 18))
     private let popover = NSPopover()
+    private let popoverContent: DeferredConstruction<NSViewController>
     private let summaryField = NSTextField(labelWithString: "Codex 用量暂不可用")
     private let detailsViewModel: UsageDetailsViewModel
     private let onSettings: () -> Void
@@ -23,11 +24,17 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         self.onQuit = onQuit
         self.onRecoverInteraction = onRecoverInteraction
         self.preferences = preferences
-        detailsViewModel = UsageDetailsViewModel(snapshot: model.snapshot)
+        let detailsViewModel = UsageDetailsViewModel(snapshot: model.snapshot)
+        self.detailsViewModel = detailsViewModel
+        popoverContent = DeferredConstruction {
+            NSHostingController(rootView: UsagePopoverView(viewModel: detailsViewModel, onRefresh: { [weak model] in
+                Task { await model?.refresh() }
+            }))
+        }
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         super.init()
         configureStatusButton()
-        configurePopover()
+        popover.behavior = .transient
         configureMenu()
         snapshotSubscription = model.$snapshot.sink { [weak self] snapshot in
             self?.ringView.setSnapshot(snapshot)
@@ -97,12 +104,6 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         button.addSubview(ringView)
     }
 
-    private func configurePopover() {
-        let controller = NSHostingController(rootView: UsagePopoverView(viewModel: detailsViewModel, onRefresh: { [weak model] in Task { await model?.refresh() } }))
-        popover.behavior = .transient
-        popover.contentViewController = controller
-    }
-
     private func configureMenu() {
         menu.delegate = self
         menu.addItem(withTitle: "立即刷新", action: #selector(refresh(_:)), keyEquivalent: "").target = self
@@ -128,6 +129,9 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         if popover.isShown {
             popover.performClose(nil)
         } else {
+            if popover.contentViewController == nil {
+                popover.contentViewController = popoverContent.value
+            }
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
         }
     }

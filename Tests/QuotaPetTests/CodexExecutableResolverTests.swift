@@ -1,3 +1,4 @@
+import CryptoKit
 import Darwin
 import Foundation
 import XCTest
@@ -110,6 +111,73 @@ final class CodexExecutableResolverTests: XCTestCase {
 
         XCTAssertTrue(resolver.inspect([input]).first?.requiresConfirmation == true)
         XCTAssertFalse(resolver.revalidate(first))
+    }
+
+    func testRepeatedLargeExecutableHashIsStable() throws {
+        let fixture = try ExecutableFixture()
+        let executable = fixture.directory.appendingPathComponent("large-codex")
+        try Data(repeating: 0x5A, count: 8 * 1_024 * 1_024).write(to: executable)
+        XCTAssertEqual(chmod(executable.path, 0o755), 0)
+        let inspector = CodexStaticExecutableInspector()
+
+        let first = try inspector.inspect(url: executable, source: .userSelected)
+        let second = try inspector.inspect(url: executable, source: .userSelected)
+
+        XCTAssertEqual(first.candidate.codeHash, second.candidate.codeHash)
+        XCTAssertEqual(first.candidate.codeHash.count, 64)
+    }
+
+    func testValidSignedBundleUsesCodeDirectoryHashWithoutHashingInnerExecutable() throws {
+        let fixture = try ExecutableFixture()
+        let executable = try fixture.makeExecutable(named: "codex", contents: "inner executable")
+        let expected = Data([0x01, 0x2A, 0xFF])
+        let inspector = CodexStaticExecutableInspector(signingInspector: FakeCodeSigningInspector(
+            metadata: SigningMetadata(
+                identifier: "com.openai.codex",
+                teamIdentifier: "2DC432GLL2",
+                codeDirectoryHash: expected,
+                isValid: true
+            )
+        ))
+
+        let result = try inspector.inspect(url: executable, source: .userSelected)
+
+        XCTAssertEqual(result.candidate.codeHash, "012aff")
+        XCTAssertTrue(result.signatureIsValid)
+    }
+
+    func testMissingCodeDirectoryHashFallsBackToWholeFileSHA256() throws {
+        let fixture = try ExecutableFixture()
+        let contents = Data("fallback executable".utf8)
+        let executable = fixture.directory.appendingPathComponent("codex")
+        try contents.write(to: executable)
+        XCTAssertEqual(chmod(executable.path, 0o755), 0)
+        let inspector = CodexStaticExecutableInspector(signingInspector: FakeCodeSigningInspector(
+            metadata: SigningMetadata(isValid: true)
+        ))
+        let expected = SHA256.hash(data: contents).map { String(format: "%02x", $0) }.joined()
+
+        let result = try inspector.inspect(url: executable, source: .userSelected)
+
+        XCTAssertEqual(result.candidate.codeHash, expected)
+    }
+
+    func testInvalidSignatureDoesNotTrustCodeDirectoryHashAndFallsBackToFileSHA256() throws {
+        let fixture = try ExecutableFixture()
+        let contents = Data("tampered executable".utf8)
+        let executable = fixture.directory.appendingPathComponent("codex")
+        try contents.write(to: executable)
+        XCTAssertEqual(chmod(executable.path, 0o755), 0)
+        let inspector = CodexStaticExecutableInspector(signingInspector: FakeCodeSigningInspector(
+            metadata: SigningMetadata(codeDirectoryHash: Data([0xAA]), isValid: false)
+        ))
+        let expected = SHA256.hash(data: contents).map { String(format: "%02x", $0) }.joined()
+
+        let result = try inspector.inspect(url: executable, source: .userSelected)
+
+        XCTAssertEqual(result.candidate.codeHash, expected)
+        XCTAssertNotEqual(result.candidate.codeHash, "aa")
+        XCTAssertFalse(result.signatureIsValid)
     }
 
     func testSigningMetadataChangeInvalidatesConfirmation() {
@@ -278,6 +346,14 @@ private final class FakeInspector: CodexExecutableInspecting {
 
     func set(_ inspection: StaticExecutableInspection, for path: String) {
         inspections[path] = inspection
+    }
+}
+
+private struct FakeCodeSigningInspector: CodeSigningInspecting {
+    let metadata: SigningMetadata
+
+    func metadata(for url: URL) -> SigningMetadata {
+        metadata
     }
 }
 

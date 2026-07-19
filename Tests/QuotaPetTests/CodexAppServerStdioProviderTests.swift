@@ -385,6 +385,46 @@ final class CodexAppServerStdioProviderTests: XCTestCase {
         withExtendedLifetime(session) {}
     }
 
+    func testFoundationSessionConsumesReadableBytesBeforeQueueingDelivery() async throws {
+        let input = Pipe()
+        let output = Pipe()
+        let error = Pipe()
+        let events = LockedEvents()
+        let deliveryQueue = DispatchQueue(label: "QuotaPetTests.suspendedDelivery")
+        deliveryQueue.suspend()
+        var queueResumed = false
+        defer {
+            if !queueResumed { deliveryQueue.resume() }
+            output.fileHandleForReading.readabilityHandler = nil
+            error.fileHandleForReading.readabilityHandler = nil
+        }
+        let session = FoundationCodexAppServerSession(
+            process: Process(),
+            input: input.fileHandleForWriting,
+            output: output.fileHandleForReading,
+            error: error.fileHandleForReading,
+            onStandardOutput: { events.append("stdout:\(String(decoding: $0, as: UTF8.self))") },
+            onStandardError: { _ in },
+            onExit: {},
+            ioQueue: deliveryQueue
+        )
+        session.installHandlers()
+        let handler = try XCTUnwrap(output.fileHandleForReading.readabilityHandler)
+        try output.fileHandleForWriting.write(contentsOf: Data("single-readable-event".utf8))
+        try output.fileHandleForWriting.close()
+
+        handler(output.fileHandleForReading)
+
+        XCTAssertTrue(output.fileHandleForReading.readDataToEndOfFile().isEmpty)
+        XCTAssertFalse(events.values.contains("stdout:single-readable-event"))
+        deliveryQueue.resume()
+        queueResumed = true
+        try await eventually("queued stdout delivery") {
+            events.values.contains("stdout:single-readable-event")
+        }
+        withExtendedLifetime(session) {}
+    }
+
     private func completeHandshake(factory: TestSessionFactory, index: Int = 0, expectsTermination: Bool = false, response: [String: Any]? = nil) async throws -> TestSession {
         try await eventually("initialize request") { factory.session(at: index)?.messages.count == 1 }
         let session = try XCTUnwrap(factory.session(at: index))

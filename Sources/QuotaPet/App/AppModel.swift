@@ -28,7 +28,7 @@ final class AppModel: NSObject, ObservableObject {
     init(provider: any UsageProvider, store: any AppPreferenceStoring = UserDefaults.standard) {
         self.provider = provider
         self.store = store
-        connectionMode = ConnectionMode(rawValue: store.object(forKey: Key.connectionMode) as? String ?? "") ?? .realtime
+        connectionMode = ConnectionMode(rawValue: store.object(forKey: Key.connectionMode) as? String ?? "") ?? .energySaver
         petVisible = store.object(forKey: Key.petVisible) as? Bool ?? true
         snapshot = QuotaSnapshot(planType: nil, windows: [], updatedAt: .distantPast, state: .loading)
         lastError = nil

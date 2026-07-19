@@ -80,6 +80,11 @@ struct CodexStaticExecutableInspector: CodexExecutableInspecting {
     private static let maximumPathBytes = 4_096
     private static let maximumFileBytes = 512 * 1_024 * 1_024
     private static let hashChunkBytes = 64 * 1_024
+    private let signingInspector: any CodeSigningInspecting
+
+    init(signingInspector: any CodeSigningInspecting = SecurityCodeSigningInspector()) {
+        self.signingInspector = signingInspector
+    }
 
     func inspect(url: URL, source: ExecutableCandidate.Source) throws -> StaticExecutableInspection {
         guard url.isFileURL, url.path.utf8.count <= Self.maximumPathBytes else {
@@ -98,14 +103,14 @@ struct CodexStaticExecutableInspector: CodexExecutableInspecting {
         defer { try? handle.close() }
         let metadata = try fileMetadata(for: descriptor)
         try validate(metadata)
-        let codeHash = try hashFile(from: handle)
-        let afterHash = try fileMetadata(for: descriptor)
-        guard sameIdentity(metadata, afterHash), sameIdentity(metadata, try pathMetadata(for: canonicalURL)) else {
-            throw CodexExecutableInspectionError.identityChanged
-        }
-
         let signingURL = signingURL(for: canonicalURL)
-        let signature = signingMetadata(for: signingURL)
+        let signature = signingInspector.metadata(for: signingURL)
+        let codeHash: String
+        if signature.isValid, let codeDirectoryHash = signature.codeDirectoryHash, !codeDirectoryHash.isEmpty {
+            codeHash = codeDirectoryHash.hexadecimalString
+        } else {
+            codeHash = try hashFile(from: handle)
+        }
         guard sameIdentity(metadata, try fileMetadata(for: descriptor)),
               sameIdentity(metadata, try pathMetadata(for: canonicalURL))
         else {
@@ -183,25 +188,47 @@ struct CodexStaticExecutableInspector: CodexExecutableInspecting {
     }
 
     private func hashFile(from handle: FileHandle) throws -> String {
-        do {
-            var hasher = SHA256()
-            var totalBytes = 0
-            while let data = try handle.read(upToCount: Self.hashChunkBytes), !data.isEmpty {
-                totalBytes += data.count
-                guard totalBytes <= Self.maximumFileBytes else {
-                    throw CodexExecutableInspectionError.fileTooLarge
-                }
-                hasher.update(data: data)
+        let buffer = UnsafeMutableRawPointer.allocate(
+            byteCount: Self.hashChunkBytes,
+            alignment: MemoryLayout<UInt8>.alignment
+        )
+        defer { buffer.deallocate() }
+        var hasher = SHA256()
+        var totalBytes = 0
+        while true {
+            let bytesRead = Darwin.read(handle.fileDescriptor, buffer, Self.hashChunkBytes)
+            if bytesRead < 0 {
+                if errno == EINTR { continue }
+                throw CodexExecutableInspectionError.hashFailed
             }
-            return hasher.finalize().map { String(format: "%02x", $0) }.joined()
-        } catch let error as CodexExecutableInspectionError {
-            throw error
-        } catch {
-            throw CodexExecutableInspectionError.hashFailed
+            guard bytesRead > 0 else { break }
+            totalBytes += bytesRead
+            guard totalBytes <= Self.maximumFileBytes else {
+                throw CodexExecutableInspectionError.fileTooLarge
+            }
+            hasher.update(bufferPointer: UnsafeRawBufferPointer(start: buffer, count: bytesRead))
         }
+        return hasher.finalize().map { String(format: "%02x", $0) }.joined()
     }
 
-    private func signingMetadata(for url: URL) -> SigningMetadata {
+    private func signingURL(for candidateURL: URL) -> URL {
+        var currentURL = candidateURL.deletingLastPathComponent()
+        while currentURL.path != "/" {
+            if currentURL.pathExtension == "app" {
+                return currentURL
+            }
+            currentURL.deleteLastPathComponent()
+        }
+        return candidateURL
+    }
+}
+
+protocol CodeSigningInspecting {
+    func metadata(for url: URL) -> SigningMetadata
+}
+
+struct SecurityCodeSigningInspector: CodeSigningInspecting {
+    func metadata(for url: URL) -> SigningMetadata {
         var staticCode: SecStaticCode?
         guard SecStaticCodeCreateWithPath(url as CFURL, [], &staticCode) == errSecSuccess,
               let staticCode
@@ -223,31 +250,34 @@ struct CodexStaticExecutableInspector: CodexExecutableInspecting {
         return SigningMetadata(
             identifier: values[kSecCodeInfoIdentifier as String] as? String,
             teamIdentifier: values[kSecCodeInfoTeamIdentifier as String] as? String,
+            codeDirectoryHash: values[kSecCodeInfoUnique as String] as? Data,
             isValid: isValid
         )
     }
+}
 
-    private func signingURL(for candidateURL: URL) -> URL {
-        var currentURL = candidateURL.deletingLastPathComponent()
-        while currentURL.path != "/" {
-            if currentURL.pathExtension == "app" {
-                return currentURL
-            }
-            currentURL.deleteLastPathComponent()
-        }
-        return candidateURL
+struct SigningMetadata {
+    let identifier: String?
+    let teamIdentifier: String?
+    let codeDirectoryHash: Data?
+    let isValid: Bool
+
+    init(
+        identifier: String? = nil,
+        teamIdentifier: String? = nil,
+        codeDirectoryHash: Data? = nil,
+        isValid: Bool = false
+    ) {
+        self.identifier = identifier
+        self.teamIdentifier = teamIdentifier
+        self.codeDirectoryHash = codeDirectoryHash
+        self.isValid = isValid
     }
 }
 
-private struct SigningMetadata {
-    let identifier: String?
-    let teamIdentifier: String?
-    let isValid: Bool
-
-    init(identifier: String? = nil, teamIdentifier: String? = nil, isValid: Bool = false) {
-        self.identifier = identifier
-        self.teamIdentifier = teamIdentifier
-        self.isValid = isValid
+private extension Data {
+    var hexadecimalString: String {
+        map { String(format: "%02x", $0) }.joined()
     }
 }
 

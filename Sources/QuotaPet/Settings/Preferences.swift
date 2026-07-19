@@ -62,7 +62,7 @@ final class Preferences: ObservableObject {
         petVisible = store.object(forKey: Key.petVisible) as? Bool ?? true
         alwaysOnTop = store.object(forKey: Key.alwaysOnTop) as? Bool ?? true
         ignoresMouseEvents = store.object(forKey: Key.ignoresMouseEvents) as? Bool ?? false
-        connectionMode = ConnectionMode(rawValue: store.object(forKey: Key.connectionMode) as? String ?? "") ?? .realtime
+        connectionMode = ConnectionMode(rawValue: store.object(forKey: Key.connectionMode) as? String ?? "") ?? .energySaver
         hotKey = Self.load(HotKeyShortcut.self, from: store, key: Key.hotKey) ?? .optionCommandU
         hotKeyStatusMessage = nil
         notificationsEnabled = store.object(forKey: Key.notificationsEnabled) as? Bool ?? false

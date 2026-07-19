@@ -61,7 +61,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var terminationCoordinator: TerminationCoordinator?
     private var preferences: Preferences?
     private var floatingPetController: FloatingPetController?
-    private var settingsController: SettingsWindowController?
+    private var settingsController: DeferredConstruction<SettingsWindowController>?
     private var globalHotKey: GlobalHotKey?
     private var launchAtLogin: LaunchAtLogin?
     private var localNotifications: LocalNotificationController?
@@ -95,13 +95,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             onRecoverInteraction: { [weak self] in self?.floatingPetController?.showAndRecoverInteraction() }
         )
         floatingPetController = FloatingPetController(model: composition.model, preferences: preferences)
-        settingsController = SettingsWindowController(preferences: preferences, candidates: { resolver.resolve() }, onConfirm: { [weak self, weak resolver] candidate in
-            guard let self, let resolver, resolver.confirm(candidate) else { return }
-            preferences.confirmedFingerprints.insert(TrustFingerprint(candidate: candidate))
-            self.restartProvider(resolver: resolver)
-        }, onRegisterHotKey: { [weak self] in self?.registerHotKey() }, onSetLaunchAtLogin: { [weak self] enabled in
-            self?.setLaunchAtLogin(enabled)
-        })
+        settingsController = DeferredConstruction { [weak self, weak resolver] in
+            SettingsWindowController(preferences: preferences, candidates: resolver?.resolve() ?? [], onConfirm: { [weak self, weak resolver] candidate in
+                guard let self, let resolver, resolver.confirm(candidate) else { return }
+                preferences.confirmedFingerprints.insert(TrustFingerprint(candidate: candidate))
+                self.restartProvider(resolver: resolver)
+            }, onRegisterHotKey: { [weak self] in self?.registerHotKey() }, onSetLaunchAtLogin: { [weak self] enabled in
+                self?.setLaunchAtLogin(enabled)
+            })
+        }
         globalHotKey = GlobalHotKey { [weak self] in
             DispatchQueue.main.async { self?.floatingPetController?.showAndRecoverInteraction() }
         }
@@ -137,7 +139,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func showSettings() {
-        settingsController?.show()
+        settingsController?.value.show()
     }
 
     private func stopAndQuit() {
