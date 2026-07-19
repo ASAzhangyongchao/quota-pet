@@ -27,7 +27,7 @@ extension PetDrawingPlan {
             .fill(path: ellipse(in: body), color: colors.body.withAlpha(opacity)),
             .stroke(
                 path: ellipse(in: ringBounds(in: size)),
-                color: colors.ring.withAlpha(0.28 * opacity),
+                color: QuotaSemanticColor.track.petDrawingColor.multiplyingAlpha(opacity),
                 lineWidth: ringLineWidth * scale,
                 dash: state.dashedRing ? [3 * scale, 2 * scale] : []
             ),
@@ -43,14 +43,38 @@ extension PetDrawingPlan {
                 endAngle: -.pi / 2 + .pi * 2 * CGFloat(used),
                 clockwise: false
             )
-            operations.append(.stroke(path: usedRing, color: colors.ring.withAlpha(opacity), lineWidth: ringLineWidth * scale, dash: []))
+            operations.append(.stroke(
+                path: usedRing,
+                color: QuotaSemanticColor.used.petDrawingColor.withAlpha(opacity),
+                lineWidth: ringLineWidth * scale,
+                dash: []
+            ))
+        }
+
+        let remaining = state.usedFraction.map { max(0, 1 - min(max($0, 0), 1)) }
+        if let remaining, remaining > 0 {
+            let remainingRing = CGMutablePath()
+            remainingRing.addArc(
+                center: center,
+                radius: ringRadius * scale,
+                startAngle: -.pi / 2 + .pi * 2 * CGFloat(used),
+                endAngle: -.pi / 2 + .pi * 2,
+                clockwise: false
+            )
+            operations.append(.stroke(
+                path: remainingRing,
+                color: QuotaSemanticColor.remaining.petDrawingColor.withAlpha(opacity),
+                lineWidth: ringLineWidth * scale,
+                dash: []
+            ))
         }
 
         let tailGeometry = PetTailGeometry(usedFraction: used, canvasSize: size)
         let tail = CGMutablePath()
         tail.move(to: tailGeometry.start)
         tail.addQuadCurve(to: tailGeometry.end, control: tailGeometry.control)
-        operations.append(.stroke(path: tail, color: colors.ring.withAlpha(opacity), lineWidth: tailGeometry.strokeWidth, dash: []))
+        let tailColor = state.dashedRing ? colors.ring : QuotaSemanticColor.used.petDrawingColor
+        operations.append(.stroke(path: tail, color: tailColor.withAlpha(opacity), lineWidth: tailGeometry.strokeWidth, dash: []))
         operations.append(eyeOperation(state.eyeShape, center: center, scale: scale, color: feature))
 
         if state.browShape == .concerned {
@@ -159,7 +183,28 @@ extension PetDrawingPlan {
     }
 }
 
+private extension QuotaSemanticColor {
+    var petDrawingColor: PetDrawingColor {
+        let color = rgba
+        return .fixed(
+            red: CGFloat(color.red),
+            green: CGFloat(color.green),
+            blue: CGFloat(color.blue),
+            alpha: CGFloat(color.alpha)
+        )
+    }
+}
+
 private extension PetDrawingColor {
+    func multiplyingAlpha(_ factor: CGFloat) -> PetDrawingColor {
+        switch self {
+        case let .fixed(red, green, blue, alpha):
+            .fixed(red: red, green: green, blue: blue, alpha: alpha * factor)
+        case let .label(alpha):
+            .label(alpha: alpha * factor)
+        }
+    }
+
     func withAlpha(_ alpha: CGFloat) -> PetDrawingColor {
         switch self {
         case let .fixed(red, green, blue, _): .fixed(red: red, green: green, blue: blue, alpha: alpha)

@@ -19,6 +19,7 @@
 "duration.hours" = "%d小时";
 "duration.minutes" = "%d分钟";
 "usage.cycle_summary" = "%@ · %@周期";
+"usage.meter_accessibility" = "已用 %d%%，剩余 %d%%";
 "action.collapse_details" = "收起用量详情";
 "title.codex_usage" = "Codex 用量";
 "usage.will_read_path" = "将读取：%@";
@@ -63,6 +64,9 @@
 "settings.confirm_trust" = "我已核对路径和签名，确认并启用";
 "settings.trusted" = "已信任";
 "settings.rejected" = "已拒绝：%@";
+"settings.about_legal" = "关于与法律说明";
+"settings.unofficial_notice" = "QuotaPet 是独立的非官方项目，与 OpenAI 无隶属关系，也未获其认可或赞助。";
+"settings.marks_notice" = "OpenAI、ChatGPT、GPT、Codex 及相关标识归各自权利人所有。";
 "hotkey.occupied" = "快捷键已被其他应用占用";
 "hotkey.registration_failed" = "快捷键注册失败，请使用菜单栏入口";
 "notification.title" = "QuotaPet 用量提醒";

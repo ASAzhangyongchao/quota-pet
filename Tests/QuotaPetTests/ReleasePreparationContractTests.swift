@@ -9,6 +9,78 @@ final class ReleasePreparationContractTests: XCTestCase {
             .deletingLastPathComponent()
     }
 
+    func testPublicIdentityLegalDocumentsAndLinksStayUnofficial() throws {
+        let legal = try XCTUnwrap(requiredContents(of: "LEGAL.md"))
+        let legalChinese = try XCTUnwrap(requiredContents(of: "LEGAL.zh-CN.md"))
+        let contributing = try XCTUnwrap(requiredContents(of: "CONTRIBUTING.md"))
+        let contributingChinese = try XCTUnwrap(requiredContents(of: "CONTRIBUTING.zh-CN.md"))
+
+        for required in [
+            "unofficial", "not affiliated", "third-party marks", "Codex App Server",
+            "rate limit", "interface", "responsibility", "MIT", "not legal advice",
+            "Q-shaped mascot", "generated application icon", "openai.com/brand",
+        ] {
+            XCTAssertTrue(legal.localizedCaseInsensitiveContains(required), "Missing English legal concept: \(required)")
+        }
+        for required in [
+            "非官方", "无隶属关系", "第三方商标", "Codex App Server", "速率限制",
+            "接口", "用户责任", "MIT", "不构成法律意见", "Q 形桌宠", "生成的应用图标",
+            "openai.com/brand",
+        ] {
+            XCTAssertTrue(legalChinese.localizedCaseInsensitiveContains(required), "缺少中文法律概念：\(required)")
+        }
+        for document in [contributing, contributingChinese] {
+            for asset in ["code", "font", "image", "icon", "sound", "screenshot", "dependency"] {
+                XCTAssertTrue(document.localizedCaseInsensitiveContains(asset), "Missing provenance category: \(asset)")
+            }
+        }
+
+        let englishEntries = ["README.md", "docs/USER_GUIDE.md"]
+        let chineseEntries = ["README.zh-CN.md", "docs/USER_GUIDE.zh-CN.md"]
+        for path in englishEntries {
+            XCTAssertTrue(try XCTUnwrap(requiredContents(of: path)).contains("LEGAL.md"), "Missing English legal link in \(path)")
+        }
+        for path in chineseEntries {
+            XCTAssertTrue(try XCTUnwrap(requiredContents(of: path)).contains("LEGAL.zh-CN.md"), "Missing Chinese legal link in \(path)")
+        }
+
+        let package = try XCTUnwrap(requiredContents(of: "Package.swift"))
+        let plistData = try Data(contentsOf: repositoryRoot.appendingPathComponent("Resources/Info.plist"))
+        let plist = try XCTUnwrap(PropertyListSerialization.propertyList(from: plistData, format: nil) as? [String: Any])
+        let publicNames = [
+            "QuotaPet",
+            plist["CFBundleName"] as? String ?? "",
+            plist["CFBundleDisplayName"] as? String ?? "",
+        ]
+        XCTAssertTrue(package.contains("name: \"QuotaPet\""))
+        for name in publicNames {
+            for forbidden in ["openai", "chatgpt", "gpt", "codex"] {
+                XCTAssertFalse(name.localizedCaseInsensitiveContains(forbidden), "Public app title contains third-party mark: \(name)")
+            }
+        }
+    }
+
+    func testReleaseGuidesRequireBrandAssetPrivacyAndTrademarkReview() throws {
+        let english = try XCTUnwrap(requiredContents(of: "docs/RELEASING.md"))
+        let chinese = try XCTUnwrap(requiredContents(of: "docs/RELEASING.zh-CN.md"))
+        let guides = english + chinese
+        for required in [
+            "name conflict", "OpenAI brand", "asset provenance", "dependency license",
+            "privacy change", "formal trademark clearance", "Global Brand Database", "CNIPA",
+        ] {
+            XCTAssertTrue(guides.localizedCaseInsensitiveContains(required), "Missing release legal gate: \(required)")
+        }
+    }
+
+    func testSettingsSourceContainsLocalizedUnofficialDisclosureWithoutRemoteLegalRequest() throws {
+        let settings = try XCTUnwrap(requiredContents(of: "Sources/QuotaPet/Settings/SettingsView.swift"))
+        XCTAssertTrue(settings.contains("settingsAboutLegal"))
+        XCTAssertTrue(settings.contains("settingsUnofficialNotice"))
+        XCTAssertTrue(settings.contains("settingsMarksNotice"))
+        XCTAssertFalse(settings.contains("URLSession"))
+        XCTAssertFalse(settings.contains("NSWorkspace.shared.open"))
+    }
+
     func testCIUsesNoReleaseSecretsOrRealCodexIntegration() throws {
         guard let workflow = try requiredContents(of: ".github/workflows/ci.yml") else { return }
 
@@ -147,8 +219,8 @@ final class ReleasePreparationContractTests: XCTestCase {
         XCTAssertTrue(documents["docs/USER_GUIDE.zh-CN.md"]?.contains("第一次打开") == true)
         XCTAssertTrue(documents["docs/USER_GUIDE.zh-CN.md"]?.contains("更新") == true)
         XCTAssertTrue(documents["docs/USER_GUIDE.zh-CN.md"]?.contains("卸载") == true)
-        XCTAssertTrue(documents["CHANGELOG.md"]?.contains("[0.1.2] - Unreleased") == true)
-        XCTAssertTrue(documents["CHANGELOG.zh-CN.md"]?.contains("[0.1.2] - 尚未发布") == true)
+        XCTAssertTrue(documents["CHANGELOG.md"]?.contains("[0.1.3] - Unreleased") == true)
+        XCTAssertTrue(documents["CHANGELOG.zh-CN.md"]?.contains("[0.1.3] - 尚未发布") == true)
 
         let releasePair = (documents["docs/RELEASING.md"] ?? "") + (documents["docs/RELEASING.zh-CN.md"] ?? "")
         for marker in ["Semantic Versioning", "GitHub", "Homebrew", "Rollback", "Developer ID", "notarytool", "SHA256", "attest"] {

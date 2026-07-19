@@ -45,6 +45,17 @@ final class PetRenderContractTests: XCTestCase {
         XCTAssertFalse(offline.showsSleepMark)
     }
 
+    func testNeutralQuotaTrackPreservesItsSemanticTransparency() throws {
+        let state = PetRenderState(snapshot: renderSnapshot(remaining: 60, state: .ready))
+        let scene = PetDrawingPlan.scene(for: state, size: CGSize(width: 72, height: 72))
+        guard case let .stroke(_, color, _, _) = scene.operations[2],
+              case let .fixed(_, _, _, alpha) = color else {
+            return XCTFail("Expected the neutral quota track as the third drawing operation")
+        }
+
+        XCTAssertEqual(alpha, 0.46, accuracy: 0.001)
+    }
+
     func testAccessibilityCommunicatesEachMoodWithoutRelyingOnColor() {
         XCTAssertEqual(PetRenderState(snapshot: renderSnapshot(remaining: 60, state: .ready), language: .simplifiedChinese).accessibilityLabel, "额度充足")
         XCTAssertEqual(PetRenderState(snapshot: renderSnapshot(remaining: 59, state: .ready), language: .simplifiedChinese).accessibilityLabel, "正常")

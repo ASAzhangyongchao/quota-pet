@@ -54,3 +54,7 @@ Disable Launch at login, quit QuotaPet, and remove `/Applications/QuotaPet.app`.
 ```bash
 defaults delete io.github.asazhangyongchao.quotapet
 ```
+
+## Legal and brand notice
+
+QuotaPet is unofficial and independent. Descriptive third-party names in the quota UI do not imply affiliation or endorsement. Read the full [English legal and brand notice](../LEGAL.md) before redistributing or modifying public branding.

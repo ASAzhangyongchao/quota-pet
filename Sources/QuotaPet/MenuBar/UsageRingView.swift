@@ -16,7 +16,7 @@ struct UsageRingStyle: Equatable {
     let staleOpacity: CGFloat
     let accessibilityLabel: String
 
-    init(snapshot: QuotaSnapshot, lineWidth: CGFloat = 2.4, language: AppLanguage = .current) {
+    init(snapshot: QuotaSnapshot, lineWidth: CGFloat = 2.8, language: AppLanguage = .current) {
         self.lineWidth = lineWidth
         startAngle = -.pi / 2
 
@@ -104,12 +104,12 @@ final class UsageRingView: NSView {
         let fullCircle = CGFloat.pi * 2
         let usedEnd = start + fullCircle * used
         if used > 0 {
-            context.setStrokeColor(NSColor.systemOrange.cgColor)
+            context.setStrokeColor(QuotaSemanticColor.used.nsColor.cgColor)
             context.addArc(center: center, radius: radius, startAngle: start, endAngle: usedEnd, clockwise: false)
             context.strokePath()
         }
         if remaining > 0 {
-            context.setStrokeColor(NSColor.systemGreen.cgColor)
+            context.setStrokeColor(QuotaSemanticColor.remaining.nsColor.cgColor)
             context.addArc(center: center, radius: radius, startAngle: usedEnd, endAngle: start + fullCircle, clockwise: false)
             context.strokePath()
         }
@@ -122,5 +122,17 @@ final class UsageRingView: NSView {
     override func accessibilityValue() -> Any? {
         guard let remaining = UsageRingStyle(snapshot: snapshot).remainingFraction else { return nil }
         return "\(Int((remaining * 100).rounded()))%"
+    }
+}
+
+private extension QuotaSemanticColor {
+    var nsColor: NSColor {
+        let color = rgba
+        return NSColor(
+            deviceRed: CGFloat(color.red),
+            green: CGFloat(color.green),
+            blue: CGFloat(color.blue),
+            alpha: CGFloat(color.alpha)
+        )
     }
 }

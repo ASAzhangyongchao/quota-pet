@@ -251,4 +251,4 @@ Inspect collapsed and expanded states in light/dark appearances, Reduce Transpar
 
 - [ ] **Step 4: Measure idle impact**
 
-Run the repository's existing performance measurement command from `docs/PERFORMANCE.md` against the built app. Expected: no repeating CPU wakeup, no disk-write loop, and no material regression outside the documented baseline thresholds.
+Run `scripts/measure-performance.sh` using the method and thresholds recorded in `docs/performance-baseline.md` against the built app. Expected: no repeating CPU wakeup, no disk-write loop, and no material regression outside the documented baseline thresholds.

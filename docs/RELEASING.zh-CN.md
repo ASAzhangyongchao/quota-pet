@@ -31,6 +31,19 @@ QuotaPet 遵循语义化版本：
 4. 确认构建 App 的版本正确，并包含 `en.lproj` 与 `zh-Hans.lproj`。
 5. 复核隐私、安全、依赖、许可证和发布说明变化。
 
+## 法律与品牌发布门禁
+
+以下每项均为失败即停止的门禁，并在发布合并请求中记录复核人和日期：
+
+1. 面向目标市场重新执行 QuotaPet **名称冲突（name conflict）**检索。
+2. 复核最新 **OpenAI 品牌规范（OpenAI brand）**，确认产品标题与图标不暗示隶属关系。
+3. 复核代码生成美术以及新增字体、图片、图标、声音和截图的**素材来源（asset provenance）**。
+4. 完成**依赖许可证（dependency license）**复核，并确认 `DEPENDENCIES.md` 与实际包图一致。
+5. 复核所有**隐私变化（privacy change）**、新增权限、联网目标、持久化字段和诊断输出。
+6. 商业化、提交 App Store 或进入新目标市场前，取得**正式商标清查（formal trademark clearance）**。公开检索只能作为初步排查，可从 WIPO [Global Brand Database](https://www.wipo.int/en/web/global-brand-database) 和中国国家知识产权局 [CNIPA](https://www.cnipa.gov.cn/art/2020/6/17/art_75_126939.html) 开始。
+
+同时重读 [LEGAL.zh-CN.md](../LEGAL.zh-CN.md)，确认非隶属与兼容性说明仍符合实际行为。
+
 ## 发布前提
 
 配置名为 `release` 的受保护 GitHub 环境，只允许版本标签触发并要求审核人；仅在该环境配置：
@@ -46,8 +59,8 @@ QuotaPet 遵循语义化版本：
 只有全部前提确认后才执行：
 
 ```bash
-git tag -s v0.1.2 -m "QuotaPet 0.1.2"
-git push origin v0.1.2
+git tag -s v0.1.3 -m "QuotaPet 0.1.3"
+git push origin v0.1.3
 ```
 
 标签必须与 `VERSION` 和 Info.plist 完全一致。发布流程会生成版本化 ZIP、DMG、`SHA256SUMS`、SBOM 和 `quotapet.rb`。
@@ -62,6 +75,6 @@ git push origin v0.1.2
 
 不要改写或删除已经发布的标签。若版本存在安全问题，应在 GitHub 明确标记、从 Homebrew tap 下架，并发布更高的补丁版本修正。用户可临时重装之前已验证的版本化产物。保留校验值、发布说明和 Git 历史，保证可审计。
 
-## 当前 0.1.2 状态
+## 当前 0.1.3 状态
 
-0.1.2 build 3 可以本机构建和安装。在签名、公证、受保护环境和干净机器验收条件真正具备之前，不创建标签，也不发布公开安装包。
+0.1.3 build 4 可以本机构建和安装。在签名、公证、受保护环境、法律复核和干净机器验收条件真正具备之前，不创建标签，也不发布公开安装包。

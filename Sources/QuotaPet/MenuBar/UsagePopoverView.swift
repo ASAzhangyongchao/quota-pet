@@ -71,6 +71,9 @@ struct UsageDetailsPresentation: Equatable {
         let resetText: String
         let countdownText: String
         let summaryText: String
+        let usedFraction: Double
+        let remainingFraction: Double
+        let meterAccessibilityText: String
     }
 
     enum StatusKind: Equatable {
@@ -112,7 +115,14 @@ struct UsageDetailsPresentation: Equatable {
                 durationText: duration,
                 resetText: reset,
                 countdownText: countdown,
-                summaryText: duration.map { L10n.text(.cycleSummary, language: language, arguments: [used, $0]) } ?? used
+                summaryText: duration.map { L10n.text(.cycleSummary, language: language, arguments: [used, $0]) } ?? used,
+                usedFraction: Self.clampFraction(window.usedPercent / 100),
+                remainingFraction: Self.clampFraction(window.remainingPercent / 100),
+                meterAccessibilityText: L10n.text(
+                    .meterAccessibility,
+                    language: language,
+                    arguments: [Int(window.usedPercent.rounded()), Int(window.remainingPercent.rounded())]
+                )
             )
         }
         updatedText = snapshot.windows.isEmpty ? nil : L10n.text(.updatedAt, language: language, arguments: [formatter.string(from: snapshot.updatedAt)])
@@ -147,6 +157,10 @@ struct UsageDetailsPresentation: Equatable {
         if minutes % (24 * 60) == 0 { return L10n.text(.durationDays, language: language, arguments: [minutes / (24 * 60)]) }
         if minutes % 60 == 0 { return L10n.text(.durationHours, language: language, arguments: [minutes / 60]) }
         return L10n.text(.durationMinutes, language: language, arguments: [minutes])
+    }
+
+    private static func clampFraction(_ value: Double) -> Double {
+        min(max(value, 0), 1)
     }
 
     private static func displayInfo(for window: QuotaWindow, language: AppLanguage) -> (name: String, note: String?) {
@@ -271,6 +285,8 @@ struct UsagePopoverView: View {
 
 private struct UsageWindowCard: View {
     let window: UsageDetailsPresentation.Window
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.colorSchemeContrast) private var colorSchemeContrast
 
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
@@ -284,6 +300,11 @@ private struct UsageWindowCard: View {
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
+            QuotaSplitMeter(
+                usedFraction: window.usedFraction,
+                remainingFraction: window.remainingFraction,
+                accessibilityText: window.meterAccessibilityText
+            )
             Text(window.summaryText)
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -298,11 +319,14 @@ private struct UsageWindowCard: View {
         .padding(10)
         .background(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Color.primary.opacity(0.055))
+                .fill(Color.primary.opacity(reduceTransparency ? 0.12 : 0.07))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(Color.white.opacity(0.16), lineWidth: 0.8)
+                .stroke(
+                    Color.primary.opacity(colorSchemeContrast == .increased ? 0.34 : 0.16),
+                    lineWidth: colorSchemeContrast == .increased ? 1.2 : 0.8
+                )
         )
     }
 }

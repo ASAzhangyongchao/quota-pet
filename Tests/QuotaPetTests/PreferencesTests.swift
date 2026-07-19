@@ -45,7 +45,8 @@ final class PreferencesTests: XCTestCase {
     }
 
     func testFloatingContractAndPassthroughRecoveryArePure() {
-        XCTAssertEqual(FloatingPetPanelContract.default.size, CGSize(width: 72, height: 72))
+        XCTAssertEqual(FloatingPetPanelContract.visiblePetSize, CGSize(width: 72, height: 72))
+        XCTAssertEqual(FloatingPetPanelContract.default.size, CGSize(width: 84, height: 84))
         XCTAssertEqual(FloatingPetPanelContract.default.levelName, .floating)
         XCTAssertTrue(FloatingPetPanelContract.default.joinsAllSpaces)
         XCTAssertEqual(FloatingPetPanelContract(alwaysOnTop: false).levelName, .normal)

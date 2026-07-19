@@ -19,6 +19,7 @@
 "duration.hours" = "%d hours";
 "duration.minutes" = "%d minutes";
 "usage.cycle_summary" = "%@ · %@ cycle";
+"usage.meter_accessibility" = "Used %d%%, remaining %d%%";
 "action.collapse_details" = "Collapse usage details";
 "title.codex_usage" = "Codex usage";
 "usage.will_read_path" = "Will read: %@";
@@ -63,6 +64,9 @@
 "settings.confirm_trust" = "I reviewed the path and signature — enable";
 "settings.trusted" = "Trusted";
 "settings.rejected" = "Rejected: %@";
+"settings.about_legal" = "About & Legal";
+"settings.unofficial_notice" = "QuotaPet is an unofficial independent project and is not affiliated with or endorsed by OpenAI.";
+"settings.marks_notice" = "OpenAI, ChatGPT, GPT, Codex, and related marks belong to their respective owners.";
 "hotkey.occupied" = "Shortcut is already used by another app";
 "hotkey.registration_failed" = "Shortcut registration failed; use the menu bar item";
 "notification.title" = "QuotaPet usage alert";

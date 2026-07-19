@@ -5,7 +5,11 @@ import SwiftUI
 
 enum FloatingPetLevelName: Equatable { case normal, floating }
 struct FloatingPetPanelContract: Equatable {
-    let size: CGSize = CGSize(width: 72, height: 72)
+    static let glowInset: CGFloat = 6
+    static let visiblePetSize = CGSize(width: 72, height: 72)
+    static let detailContentSize = CGSize(width: 320, height: 354)
+    static let expandedSize = CGSize(width: 332, height: 366)
+    let size: CGSize = CGSize(width: 84, height: 84)
     let levelName: FloatingPetLevelName
     let joinsAllSpaces: Bool
     init(alwaysOnTop: Bool = true) { levelName = alwaysOnTop ? .floating : .normal; joinsAllSpaces = alwaysOnTop }
@@ -99,50 +103,6 @@ struct AnimationResetGeneration {
 }
 
 @MainActor
-final class GlassDetailContainerView: NSVisualEffectView {
-    let hostedView: NSView
-    private let cornerMask = CAShapeLayer()
-
-    init(hostedView: NSView) {
-        self.hostedView = hostedView
-        super.init(frame: .zero)
-        material = .hudWindow
-        blendingMode = .behindWindow
-        state = .active
-        wantsLayer = true
-        layer?.cornerRadius = 22
-        layer?.cornerCurve = .continuous
-        layer?.borderWidth = 1
-        layer?.borderColor = NSColor.white.withAlphaComponent(0.22).cgColor
-        layer?.masksToBounds = true
-        layer?.mask = cornerMask
-
-        hostedView.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(hostedView)
-        NSLayoutConstraint.activate([
-            hostedView.leadingAnchor.constraint(equalTo: leadingAnchor),
-            hostedView.trailingAnchor.constraint(equalTo: trailingAnchor),
-            hostedView.topAnchor.constraint(equalTo: topAnchor),
-            hostedView.bottomAnchor.constraint(equalTo: bottomAnchor),
-        ])
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
-
-    override func layout() {
-        super.layout()
-        cornerMask.frame = bounds
-        cornerMask.path = CGPath(
-            roundedRect: bounds,
-            cornerWidth: 22,
-            cornerHeight: 22,
-            transform: nil
-        )
-    }
-}
-
-@MainActor
 final class FloatingPetController: NSObject, NSWindowDelegate {
     private let model: AppModel
     private let preferences: Preferences
@@ -150,6 +110,7 @@ final class FloatingPetController: NSObject, NSWindowDelegate {
     private let detailsViewModel: UsageDetailsViewModel
     private var latestRenderState: PetRenderState
     private var petView: PetAppKitView!
+    private var collapsedContainer: PetGlowContainerView!
     private var detailHosting: ExpandableConstruction<NSView>!
     private var snapshotSubscription: AnyCancellable?
     private var preferencesSubscriptions = Set<AnyCancellable>()
@@ -163,7 +124,6 @@ final class FloatingPetController: NSObject, NSWindowDelegate {
     private var animationGeneration = AnimationResetGeneration()
     private var moveClampWork: DispatchWorkItem?
     private var isCorrectingFrame = false
-    private let expandedSize = NSSize(width: 320, height: 354)
 
     init(model: AppModel, preferences: Preferences, connectionOffer: CodexConnectionOffer? = nil) {
         self.model = model
@@ -177,6 +137,10 @@ final class FloatingPetController: NSObject, NSWindowDelegate {
             onClick: { [weak self] in self?.tapPet() },
             onHover: { [weak self] in self?.play(.hover) }
         )
+        collapsedContainer = PetGlowContainerView(
+            petView: petView,
+            style: QuotaVisualStyle(snapshot: model.snapshot, connectionMode: preferences.connectionMode)
+        )
         detailHosting = ExpandableConstruction { [weak self] in
             guard let self else { return NSView() }
             let hostingView = NSHostingView(rootView: UsagePopoverView(
@@ -185,7 +149,10 @@ final class FloatingPetController: NSObject, NSWindowDelegate {
                 connectionOffer: connectionOffer,
                 onRefresh: { [weak self] in Task { await self?.model.refresh() } }
             ))
-            return GlassDetailContainerView(hostedView: hostingView)
+            return DetailGlowContainerView(
+                hostedView: hostingView,
+                style: QuotaVisualStyle(snapshot: self.model.snapshot, connectionMode: self.preferences.connectionMode)
+            )
         }
         configurePanel()
         installCollapsedView()
@@ -193,6 +160,7 @@ final class FloatingPetController: NSObject, NSWindowDelegate {
             guard let self else { return }
             self.latestRenderState = PetRenderState(snapshot: snapshot)
             self.petView.update(renderState: self.latestRenderState)
+            self.updateGlowStyle(snapshot: snapshot)
             self.detailsViewModel.update(snapshot)
             self.play(.stateChange)
             self.scheduleIdleBlink()
@@ -251,15 +219,17 @@ final class FloatingPetController: NSObject, NSWindowDelegate {
     private func installCollapsedView() {
         // Replace the intrinsic-size SwiftUI detail first. Otherwise its constraints can
         // prevent setContentSize from shrinking the panel and stretch the pet to 320 pt.
-        panel.contentView = petView
+        panel.contentView = collapsedContainer
         panel.setContentSize(FloatingPetPanelContract.default.size)
-        petView.frame = NSRect(origin: .zero, size: FloatingPetPanelContract.default.size)
+        collapsedContainer.frame = NSRect(origin: .zero, size: FloatingPetPanelContract.default.size)
+        collapsedContainer.layoutSubtreeIfNeeded()
     }
 
     private func applyPreferences() {
         panel.level = preferences.alwaysOnTop ? .floating : .normal
         panel.collectionBehavior = preferences.alwaysOnTop ? [.canJoinAllSpaces, .fullScreenAuxiliary] : []
         panel.ignoresMouseEvents = preferences.ignoresMouseEvents
+        updateGlowStyle(snapshot: model.snapshot)
         if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion || !preferences.petVisible || preferences.connectionMode == .energySaver {
             cancelAnimationAndIdle()
         }
@@ -289,10 +259,10 @@ final class FloatingPetController: NSObject, NSWindowDelegate {
         let previousFrame = panel.frame
         let visibleFrame = currentScreen(for: previousFrame)?.visibleFrame ?? previousFrame
         let hostedView = detailHosting.expand()
-        hostedView.frame = NSRect(origin: .zero, size: expandedSize)
+        hostedView.frame = NSRect(origin: .zero, size: FloatingPetPanelContract.expandedSize)
         panel.contentView = hostedView
-        panel.hasShadow = true
-        setPanelFrame(FloatingPanelGeometry.resizedFrame(from: previousFrame, to: expandedSize, within: visibleFrame))
+        panel.hasShadow = false
+        setPanelFrame(FloatingPanelGeometry.resizedFrame(from: previousFrame, to: FloatingPetPanelContract.expandedSize, within: visibleFrame))
     }
 
     private func collapseDetail() {
@@ -305,6 +275,12 @@ final class FloatingPetController: NSObject, NSWindowDelegate {
         panel.hasShadow = false
         setPanelFrame(FloatingPanelGeometry.resizedFrame(from: previousFrame, to: FloatingPetPanelContract.default.size, within: visibleFrame))
         savePosition()
+    }
+
+    private func updateGlowStyle(snapshot: QuotaSnapshot) {
+        let style = QuotaVisualStyle(snapshot: snapshot, connectionMode: preferences.connectionMode)
+        collapsedContainer?.update(style: style)
+        (detailHosting?.expandedValue as? DetailGlowContainerView)?.update(style: style)
     }
 
     private func scheduleIdleBlink() {

@@ -18,7 +18,7 @@ final class CodexAppServerStdioProviderTests: XCTestCase {
         XCTAssertEqual(factory.executables, [testCandidate().canonicalURL])
         XCTAssertEqual(factory.arguments, [["app-server", "--stdio"]])
         XCTAssertEqual(try session.method(at: 0), "initialize")
-        XCTAssertEqual(try session.params(at: 0) as? [String: [String: String]], ["clientInfo": ["name": "quota_pet", "title": "QuotaPet", "version": "0.1.2"]])
+        XCTAssertEqual(try session.params(at: 0) as? [String: [String: String]], ["clientInfo": ["name": "quota_pet", "title": "QuotaPet", "version": "0.1.3"]])
 
         session.reply(id: 1, result: [:])
         try await eventually("initialized notification") { session.messages.count >= 2 }
