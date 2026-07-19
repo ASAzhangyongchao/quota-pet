@@ -138,11 +138,89 @@ final class PackagingContractTests: XCTestCase {
         XCTAssertEqual(try fixture.installedApplicationVersion(), "new-app")
     }
 
+    func testConcurrentBuildTransactionsAreSerializedBeforeRecovery() throws {
+        guard try scriptsExposeSafeTransactionHarness() else { return }
+        let fixture = try TransactionFixture(hasOldApplication: true, hasOldZip: true)
+        let first = try startScript("build-app.sh", fixture: fixture, hook: "block:after_lock")
+        defer { fixture.releaseHook("after_lock"); stopIfRunning(first) }
+
+        XCTAssertTrue(waitForPath(fixture.hookReadyURL("after_lock")), "First build did not acquire the lock")
+        let started = Date()
+        XCTAssertNotEqual(try runScript("build-app.sh", fixture: fixture, hook: ""), 0)
+        XCTAssertLessThan(Date().timeIntervalSince(started), 2)
+        XCTAssertEqual(try fixture.applicationVersion(), "old-app")
+        XCTAssertEqual(try fixture.zipVersion(), "old-zip")
+        XCTAssertEqual(try fixture.transactionCount(for: "build-app.sh"), 0)
+        XCTAssertEqual(try fixture.lockClaimCount(for: "build-app.sh"), 0)
+
+        fixture.releaseHook("after_lock")
+        first.waitUntilExit()
+        XCTAssertEqual(first.terminationStatus, 0, processError(first))
+        XCTAssertEqual(try fixture.applicationVersion(), "new-app")
+        XCTAssertEqual(try fixture.zipVersion(), "new-zip")
+    }
+
+    func testConcurrentInstallTransactionsAreSerializedBeforeRecovery() throws {
+        guard try scriptsExposeSafeTransactionHarness() else { return }
+        let fixture = try TransactionFixture(hasOldApplication: true, hasOldZip: true)
+        let first = try startScript("install-local.sh", fixture: fixture, hook: "block:after_lock")
+        defer { fixture.releaseHook("after_lock"); stopIfRunning(first) }
+
+        XCTAssertTrue(waitForPath(fixture.hookReadyURL("after_lock")), "First install did not acquire the lock")
+        let started = Date()
+        let second = try startScript("install-local.sh", fixture: fixture, hook: "")
+        second.waitUntilExit()
+        let secondError = processError(second)
+        XCTAssertNotEqual(second.terminationStatus, 0, secondError)
+        XCTAssertLessThan(Date().timeIntervalSince(started), 2)
+        XCTAssertEqual(try fixture.installedApplicationVersion(), "old-app")
+        XCTAssertEqual(try fixture.transactionCount(for: "install-local.sh"), 0)
+        XCTAssertEqual(try fixture.lockClaimCount(for: "install-local.sh"), 0)
+
+        fixture.releaseHook("after_lock")
+        first.waitUntilExit()
+        XCTAssertEqual(first.terminationStatus, 0, "\(processError(first))\nsecond: \(secondError)")
+        XCTAssertEqual(try fixture.installedApplicationVersion(), "new-app")
+    }
+
+    func testStaleBuildAndInstallLocksAreClaimedSafely() throws {
+        guard try scriptsExposeSafeTransactionHarness() else { return }
+        for script in ["build-app.sh", "install-local.sh"] {
+            let fixture = try TransactionFixture(hasOldApplication: true, hasOldZip: true)
+            try fixture.prepareStaleLock(for: script)
+            XCTAssertEqual(try runScript(script, fixture: fixture, hook: "fail:after_lock"), 97, script)
+            XCTAssertEqual(try fixture.applicationVersion(), "old-app", script)
+            XCTAssertEqual(try fixture.installedApplicationVersion(), "old-app", script)
+        }
+    }
+
+    func testPackageVerifierRejectsEarlySensitiveStringBeforeLargeTail() throws {
+        let fixture = try TransactionFixture(hasOldApplication: true, hasOldZip: true)
+        let binary = fixture.root.appendingPathComponent("scan/large-binary")
+        try fixture.writeSensitiveScanBinary(at: binary)
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/bash")
+        process.arguments = [repositoryRoot.appendingPathComponent("scripts/verify-package.sh").path]
+        var environment = ProcessInfo.processInfo.environment
+        environment["QUOTAPET_TEST_MODE"] = "1"
+        environment["QUOTAPET_TEST_ROOT"] = fixture.root.path
+        environment["QUOTAPET_VERIFY_SCAN_FILE"] = binary.path
+        process.environment = environment
+        process.standardOutput = Pipe()
+        process.standardError = Pipe()
+        try process.run()
+        process.waitUntilExit()
+
+        XCTAssertNotEqual(process.terminationStatus, 0)
+    }
+
     func testPublicFilesDoNotContainPrivateWorkspacePaths() throws {
         let publicFiles = [
             "README.md", "AGENTS.md", "PRIVACY.md", "SECURITY.md",
             "THREAT_MODEL.md", "DEPENDENCIES.md", "LICENSE",
             "scripts/build-app.sh", "scripts/generate-icon.swift", "scripts/install-local.sh",
+            "scripts/transaction-lock.sh",
         ]
         let privateWorkspaceName = ["knowledge", "system"].joined(separator: "-")
         for path in publicFiles {
@@ -191,6 +269,12 @@ final class PackagingContractTests: XCTestCase {
     }
 
     private func runScript(_ name: String, fixture: TransactionFixture, hook: String) throws -> Int32 {
+        let process = try startScript(name, fixture: fixture, hook: hook)
+        process.waitUntilExit()
+        return process.terminationStatus
+    }
+
+    private func startScript(_ name: String, fixture: TransactionFixture, hook: String) throws -> Process {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/bash")
         process.arguments = [repositoryRoot.appendingPathComponent("scripts/\(name)").path]
@@ -202,8 +286,27 @@ final class PackagingContractTests: XCTestCase {
         process.standardOutput = Pipe()
         process.standardError = Pipe()
         try process.run()
+        return process
+    }
+
+    private func waitForPath(_ url: URL, timeout: TimeInterval = 3) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if FileManager.default.fileExists(atPath: url.path) { return true }
+            Thread.sleep(forTimeInterval: 0.02)
+        }
+        return false
+    }
+
+    private func stopIfRunning(_ process: Process) {
+        guard process.isRunning else { return }
+        process.terminate()
         process.waitUntilExit()
-        return process.terminationStatus
+    }
+
+    private func processError(_ process: Process) -> String {
+        guard let pipe = process.standardError as? Pipe else { return "" }
+        return String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
     }
 }
 
@@ -254,6 +357,46 @@ private final class TransactionFixture {
         for marker in ["committed", "original-app-present", "original-zip-present", "app-install-intent", "zip-install-intent"] {
             try writeVersion("", at: transaction.appendingPathComponent(marker))
         }
+    }
+
+    func hookReadyURL(_ point: String) -> URL {
+        root.appendingPathComponent("hooks/\(point).ready")
+    }
+
+    func releaseHook(_ point: String) {
+        try? writeVersion("", at: root.appendingPathComponent("hooks/\(point).release"))
+    }
+
+    func transactionCount(for script: String) throws -> Int {
+        let directory = script == "build-app.sh" ? root.appendingPathComponent("dist") : root.appendingPathComponent("Applications")
+        let prefix = script == "build-app.sh" ? ".transaction-" : ".QuotaPet.install."
+        return try FileManager.default.contentsOfDirectory(atPath: directory.path)
+            .filter { $0.hasPrefix(prefix) }
+            .count
+    }
+
+    func lockClaimCount(for script: String) throws -> Int {
+        let directory = script == "build-app.sh" ? root : root.appendingPathComponent("Applications")
+        let prefix = script == "build-app.sh" ? ".QuotaPet.build.lock.claim." : ".QuotaPet.install-lock.claim."
+        return try FileManager.default.contentsOfDirectory(atPath: directory.path).filter { $0.hasPrefix(prefix) }.count
+    }
+
+    func prepareStaleLock(for script: String) throws {
+        let lock = script == "build-app.sh"
+            ? root.appendingPathComponent(".QuotaPet.build.lock", isDirectory: true)
+            : root.appendingPathComponent("Applications/.QuotaPet.install-lock", isDirectory: true)
+        try writeVersion("99999999", at: lock.appendingPathComponent("owner-pid"))
+        try writeVersion(script, at: lock.appendingPathComponent("owner-command"))
+        try writeVersion("stale-token", at: lock.appendingPathComponent("owner-token"))
+        try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSinceNow: -60)], ofItemAtPath: lock.path)
+    }
+
+    func writeSensitiveScanBinary(at url: URL) throws {
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        var data = Data((["ghp", "_", String(repeating: "A", count: 20)].joined() + "\0").utf8)
+        let tail = Data(("safe-tail-" + String(repeating: "x", count: 80) + "\0").utf8)
+        for _ in 0..<50_000 { data.append(tail) }
+        try data.write(to: url)
     }
 
     private func writeVersion(_ value: String, at url: URL) throws {

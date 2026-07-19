@@ -24,6 +24,11 @@ else
     [[ "$DIST_DIR" == "$PROJECT_ROOT/dist" ]] || { echo "Project dist escaped its root." >&2; exit 1; }
 fi
 
+LOCK_PARENT="$(cd -- "$DIST_DIR/.." && pwd -P)"
+LOCK_NAME=".QuotaPet.build.lock"
+LOCK_COMMAND="QuotaPet/build-app"
+source "$SCRIPT_DIR/transaction-lock.sh"
+
 FINAL_APP="$DIST_DIR/QuotaPet.app"
 FINAL_ZIP="$DIST_DIR/QuotaPet.zip"
 STAGING_DIR=""
@@ -42,6 +47,15 @@ run_test_hook() {
         "int:$point") kill -INT "$$" ;;
         "term:$point") kill -TERM "$$" ;;
         "kill:$point") kill -KILL "$$" ;;
+        "block:$point")
+            mkdir -p -- "$TEST_ROOT/hooks"
+            : >"$TEST_ROOT/hooks/$point.ready"
+            for _ in {1..500}; do
+                [[ ! -e "$TEST_ROOT/hooks/$point.release" ]] || return 0
+                sleep 0.02
+            done
+            return 98
+            ;;
     esac
 }
 
@@ -161,12 +175,17 @@ cleanup() {
     else
         echo "Rollback was incomplete; preserved transaction at $TRANSACTION_DIR" >&2
     fi
+    if ! release_global_lock; then
+        [[ "$status" -ne 0 ]] || status=1
+    fi
     exit "$status"
 }
 trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
+acquire_global_lock
+run_test_hook after_lock
 recover_orphaned_transactions
 STAGING_DIR="$(mktemp -d "$DIST_DIR/.staging-XXXXXX")"
 STAGED_APP="$STAGING_DIR/QuotaPet.app"

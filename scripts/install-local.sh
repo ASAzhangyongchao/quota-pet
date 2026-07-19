@@ -25,6 +25,11 @@ else
     [[ "$APPLICATIONS_DIR" == "/Applications" ]] || { echo "/Applications escaped its expected path." >&2; exit 1; }
 fi
 
+LOCK_PARENT="$APPLICATIONS_DIR"
+LOCK_NAME=".QuotaPet.install-lock"
+LOCK_COMMAND="QuotaPet/install-local"
+source "$SCRIPT_DIR/transaction-lock.sh"
+
 TARGET_APP="$APPLICATIONS_DIR/QuotaPet.app"
 EXPECTED_EXECUTABLE="$TARGET_APP/Contents/MacOS/QuotaPet"
 EXPECTED_BUNDLE_ID="io.github.asazhangyongchao.quotapet"
@@ -43,6 +48,15 @@ run_test_hook() {
         "int:$point") kill -INT "$$" ;;
         "term:$point") kill -TERM "$$" ;;
         "kill:$point") kill -KILL "$$" ;;
+        "block:$point")
+            mkdir -p -- "$TEST_ROOT/hooks"
+            : >"$TEST_ROOT/hooks/$point.ready"
+            for _ in {1..500}; do
+                [[ ! -e "$TEST_ROOT/hooks/$point.release" ]] || return 0
+                sleep 0.02
+            done
+            return 98
+            ;;
     esac
 }
 
@@ -142,6 +156,9 @@ cleanup() {
     else
         echo "Rollback was incomplete; preserved transaction at $TRANSACTION_DIR" >&2
     fi
+    if ! release_global_lock; then
+        [[ "$status" -ne 0 ]] || status=1
+    fi
     exit "$status"
 }
 trap cleanup EXIT
@@ -163,6 +180,8 @@ if [[ "$TEST_MODE" != "1" ]]; then
     [[ -x "$SOURCE_APP/Contents/MacOS/QuotaPet" ]] || { echo "Source executable is missing." >&2; exit 1; }
 fi
 
+acquire_global_lock
+run_test_hook after_lock
 recover_orphaned_transactions
 TRANSACTION_DIR="$(mktemp -d "$APPLICATIONS_DIR/.QuotaPet.install.XXXXXX")"
 printf '%s\n' "$$" >"$TRANSACTION_DIR/owner-pid"
