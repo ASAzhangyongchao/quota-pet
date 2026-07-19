@@ -40,20 +40,25 @@ final class AppModel: NSObject, ObservableObject {
     }
 
     func start() async {
-        if snapshotTask == nil {
-            let provider = provider
-            snapshotTask = Task { [weak self, provider] in
-                for await incoming in provider.snapshots {
-                    guard !Task.isCancelled else { return }
-                    self?.receive(incoming)
-                }
-            }
-        }
+        startSnapshotTaskIfNeeded()
         await provider.start(mode: connectionMode)
     }
 
     func refresh() async {
         await provider.refresh()
+    }
+
+    func recoverAfterWake(mode: ConnectionMode) async {
+        if connectionMode != mode {
+            connectionMode = mode
+            store.set(mode.rawValue, forKey: Key.connectionMode)
+        }
+        startSnapshotTaskIfNeeded()
+        await provider.recover(mode: connectionMode, restartIfStopped: true)
+    }
+
+    func recoverAfterNetwork() async {
+        await provider.recover(mode: connectionMode, restartIfStopped: false)
     }
 
     func setConnectionMode(_ mode: ConnectionMode) async {
@@ -77,6 +82,17 @@ final class AppModel: NSObject, ObservableObject {
         snapshotTask?.cancel()
         snapshotTask = nil
         await provider.stop()
+    }
+
+    private func startSnapshotTaskIfNeeded() {
+        guard snapshotTask == nil else { return }
+        let provider = provider
+        snapshotTask = Task { [weak self, provider] in
+            for await incoming in provider.snapshots {
+                guard !Task.isCancelled else { return }
+                self?.receive(incoming)
+            }
+        }
     }
 
     private func receive(_ incoming: QuotaSnapshot) {
@@ -122,6 +138,14 @@ final class UnavailableUsageProvider: UsageProvider {
 
     func refresh() async {
         continuation.yield(QuotaSnapshot(planType: nil, windows: [], updatedAt: .now, state: .unavailable(message)))
+    }
+
+    func recover(mode: ConnectionMode, restartIfStopped: Bool) async {
+        if restartIfStopped {
+            await start(mode: mode)
+        } else {
+            await refresh()
+        }
     }
 
     func stop() async {}

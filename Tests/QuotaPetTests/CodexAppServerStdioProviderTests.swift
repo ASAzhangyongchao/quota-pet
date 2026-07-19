@@ -31,6 +31,7 @@ final class CodexAppServerStdioProviderTests: XCTestCase {
         try await eventually("ready snapshot") { snapshots.values.contains { $0.state == .ready } }
         XCTAssertFalse(session.terminated)
         XCTAssertFalse(session.messages.contains { ["experimentalApi", "account/read", "thread", "shell", "mcp", "purchase", "reset"].contains((try? session.method(for: $0)) ?? "") })
+        try await stop(provider, session: session)
     }
 
     func testEnergySaverTerminatesAfterReadAndWakeCreatesNewSession() async throws {
@@ -38,11 +39,16 @@ final class CodexAppServerStdioProviderTests: XCTestCase {
         let provider = CodexAppServerStdioProvider(candidate: testCandidate(), resolver: TestResolver(isTrusted: true), sessionFactory: factory, scheduler: TestScheduler(), requestTimeout: 15)
 
         await provider.start(mode: .energySaver)
-        _ = try await completeHandshake(factory: factory, expectsTermination: true)
+        let first = try await completeHandshake(factory: factory, expectsTermination: true)
+        first.exit()
 
-        await provider.wake()
-        _ = try await completeHandshake(factory: factory, index: 1, expectsTermination: true)
+        let recovered = LockedFlag()
+        Task { await provider.recover(mode: .energySaver, restartIfStopped: true); recovered.set() }
+        let second = try await completeHandshake(factory: factory, index: 1, expectsTermination: true)
+        second.exit()
+        try await eventually("energy wake completion") { recovered.value }
         XCTAssertEqual(factory.sessions.count, 2)
+        await provider.stop()
     }
 
     func testRejectsUntrustedCandidateWithoutStartingProcess() async throws {
@@ -62,12 +68,18 @@ final class CodexAppServerStdioProviderTests: XCTestCase {
         await provider.start(mode: .realtime)
         let first = try await completeHandshake(factory: factory)
         XCTAssertFalse(first.terminated)
-        await provider.start(mode: .energySaver)
-        XCTAssertTrue(first.terminated)
+        let switched = LockedFlag()
+        Task { await provider.start(mode: .energySaver); switched.set() }
+        try await eventually("old generation termination") { first.terminated }
+        XCTAssertEqual(factory.sessions.count, 1)
+        first.exit()
         let second = try await completeHandshake(factory: factory, index: 1, expectsTermination: true)
         first.exit()
         try await eventually("replacement termination") { second.terminated }
+        second.exit()
+        try await eventually("mode switch completion") { switched.value }
         XCTAssertEqual(factory.sessions.count, 2)
+        await provider.stop()
     }
 
     func testRealtimeNotificationPublishesReadyWithoutClosingSession() async throws {
@@ -81,6 +93,7 @@ final class CodexAppServerStdioProviderTests: XCTestCase {
         session.notify(method: "account/rateLimits/updated", params: validRateLimits())
         try await eventually("notification snapshot") { snapshots.values.count > countBeforeNotification && snapshots.values.last?.state == .ready }
         XCTAssertFalse(session.terminated)
+        try await stop(provider, session: session)
     }
 
     func testInvalidResponseSchedulesFiveSecondRetryAndReadyResetsBackoff() async throws {
@@ -107,22 +120,128 @@ final class CodexAppServerStdioProviderTests: XCTestCase {
         let provider = CodexAppServerStdioProvider(candidate: testCandidate(), resolver: TestResolver(isTrusted: true), sessionFactory: factory, scheduler: scheduler, requestTimeout: 15)
         await provider.start(mode: .realtime)
         let first = try await completeHandshake(factory: factory)
-        await provider.start(mode: .energySaver)
+        Task { await provider.start(mode: .energySaver) }
+        try await eventually("first mode termination") { first.terminated }
+        first.exit()
         let second = try await completeHandshake(factory: factory, index: 1, expectsTermination: true)
-        await provider.stop()
+        let stopped = LockedFlag()
+        Task { await provider.stop(); stopped.set() }
 
         XCTAssertTrue(scheduler.tasks(withDelay: 600).allSatisfy(\.cancelled))
         let forceTasks = scheduler.tasks(withDelay: 1)
         XCTAssertGreaterThanOrEqual(forceTasks.count, 2)
-        XCTAssertFalse(forceTasks[0].cancelled)
+        XCTAssertTrue(forceTasks[0].cancelled)
         XCTAssertFalse(forceTasks[1].cancelled)
-        forceTasks.forEach { $0.fire() }
-        XCTAssertTrue(first.forced)
+        forceTasks[1].fire()
+        try await eventually("stop after energy force fallback") { stopped.value }
+        XCTAssertFalse(first.forced)
         XCTAssertTrue(second.forced)
     }
 
     func testFoundationFactoryIsInstantiableWithoutShellAPI() {
         _ = FoundationCodexAppServerSessionFactory()
+    }
+
+    func testStopReturnsOnlyAfterSessionExit() async throws {
+        let factory = TestSessionFactory()
+        let provider = CodexAppServerStdioProvider(candidate: testCandidate(), resolver: TestResolver(isTrusted: true), sessionFactory: factory, scheduler: TestScheduler(), requestTimeout: 15)
+        await provider.start(mode: .realtime)
+        let session = try await completeHandshake(factory: factory)
+        let stopped = LockedFlag()
+
+        Task { await provider.stop(); stopped.set() }
+        try await eventually("graceful termination request") { session.terminated }
+        try await Task.sleep(nanoseconds: 5_000_000)
+        XCTAssertFalse(stopped.value)
+
+        session.exit()
+        try await eventually("stop completion after exit") { stopped.value }
+    }
+
+    func testStopForceFallbackCompletesAndLateExitIsHarmless() async throws {
+        let factory = TestSessionFactory()
+        let scheduler = TestScheduler()
+        let provider = CodexAppServerStdioProvider(candidate: testCandidate(), resolver: TestResolver(isTrusted: true), sessionFactory: factory, scheduler: scheduler, requestTimeout: 15)
+        await provider.start(mode: .realtime)
+        let session = try await completeHandshake(factory: factory)
+        let stopped = LockedFlag()
+
+        Task { await provider.stop(); stopped.set() }
+        try await eventually("force fallback") { scheduler.tasks(withDelay: 1).count == 1 }
+        XCTAssertFalse(stopped.value)
+        scheduler.tasks(withDelay: 1)[0].fire()
+
+        try await eventually("forced stop completion") { session.forced && stopped.value }
+        session.exit()
+        try await Task.sleep(nanoseconds: 1_000_000)
+        XCTAssertTrue(stopped.value)
+    }
+
+    func testModeSwitchDoesNotStartReplacementBeforeOldSessionExits() async throws {
+        let factory = TestSessionFactory()
+        let provider = CodexAppServerStdioProvider(candidate: testCandidate(), resolver: TestResolver(isTrusted: true), sessionFactory: factory, scheduler: TestScheduler(), requestTimeout: 15)
+        await provider.start(mode: .realtime)
+        let first = try await completeHandshake(factory: factory)
+
+        Task { await provider.start(mode: .energySaver) }
+        try await eventually("old session termination") { first.terminated }
+        try await Task.sleep(nanoseconds: 5_000_000)
+        XCTAssertEqual(factory.sessions.count, 1)
+
+        first.exit()
+        let second = try await completeHandshake(factory: factory, index: 1, expectsTermination: true)
+        XCTAssertEqual(factory.sessions.count, 2)
+        try await stop(provider, session: second)
+    }
+
+    func testWakeRecoveryAwaitsExactlyOneInitialRead() async throws {
+        let factory = TestSessionFactory()
+        let provider = CodexAppServerStdioProvider(candidate: testCandidate(), resolver: TestResolver(isTrusted: true), sessionFactory: factory, scheduler: TestScheduler(), requestTimeout: 15)
+        await provider.start(mode: .realtime)
+        let first = try await completeHandshake(factory: factory)
+        let stopped = LockedFlag()
+        Task { await provider.stop(); stopped.set() }
+        try await eventually("sleep termination") { first.terminated }
+        first.exit()
+        try await eventually("sleep stop completion") { stopped.value }
+
+        let recovered = LockedFlag()
+        Task {
+            await provider.recover(mode: .realtime, restartIfStopped: true)
+            recovered.set()
+        }
+        try await eventually("wake initialize") { factory.session(at: 1)?.messages.count == 1 }
+        let second = try XCTUnwrap(factory.session(at: 1))
+        second.reply(id: 1, result: [:])
+        try await eventually("wake rate-limit read") { second.messages.count == 3 }
+        XCTAssertFalse(recovered.value)
+        second.reply(id: 2, result: validRateLimits())
+        try await eventually("wake recovery completion") { recovered.value }
+
+        XCTAssertEqual(second.messages.compactMap { try? second.method(for: $0) }.filter { $0 == "account/rateLimits/read" }.count, 1)
+        XCTAssertEqual(factory.sessions.count, 2)
+        try await stop(provider, session: second)
+    }
+
+    func testNetworkRecoveryAwaitsExactlyOneReadWithoutNewSession() async throws {
+        let factory = TestSessionFactory()
+        let provider = CodexAppServerStdioProvider(candidate: testCandidate(), resolver: TestResolver(isTrusted: true), sessionFactory: factory, scheduler: TestScheduler(), requestTimeout: 15)
+        await provider.start(mode: .realtime)
+        let session = try await completeHandshake(factory: factory)
+        let recovered = LockedFlag()
+
+        Task {
+            await provider.recover(mode: .realtime, restartIfStopped: false)
+            recovered.set()
+        }
+        try await eventually("network recovery read") { session.messages.count == 4 }
+        XCTAssertFalse(recovered.value)
+        session.reply(id: 3, result: validRateLimits())
+        try await eventually("network recovery completion") { recovered.value }
+
+        XCTAssertEqual(session.messages.compactMap { try? session.method(for: $0) }.filter { $0 == "account/rateLimits/read" }.count, 2)
+        XCTAssertEqual(factory.sessions.count, 1)
+        try await stop(provider, session: session)
     }
 
     func testExitRetryAndPeriodicEnergyRefreshCreateNewSessions() async throws {
@@ -136,11 +255,16 @@ final class CodexAppServerStdioProviderTests: XCTestCase {
         scheduler.tasks(withDelay: 5)[0].fire()
         try await eventually("reconnected session") { factory.sessions.count == 2 }
 
-        await provider.start(mode: .energySaver)
+        let retry = try XCTUnwrap(factory.session(at: 1))
+        Task { await provider.start(mode: .energySaver) }
+        try await eventually("retry session termination for mode switch") { retry.terminated }
+        retry.exit()
         _ = try await completeHandshake(factory: factory, index: 2, expectsTermination: true)
+        factory.session(at: 2)?.exit()
         let periodic = try XCTUnwrap(scheduler.tasks(withDelay: 600).last)
         periodic.fire()
         try await eventually("periodic energy session") { factory.sessions.count == 4 }
+        try await stop(provider, session: try XCTUnwrap(factory.session(at: 3)))
     }
 
     func testConcurrentStartAndRefreshUseAtMostOneSession() async throws {
@@ -152,6 +276,7 @@ final class CodexAppServerStdioProviderTests: XCTestCase {
         async let manual: Void = provider.refresh()
         _ = await (first, second, manual)
         try await eventually("single initial session") { factory.sessions.count == 1 }
+        try await stop(provider, session: try XCTUnwrap(factory.session(at: 0)))
     }
 
     func testStandardErrorTailAndMalformedStdoutUseProviderFailurePath() async throws {
@@ -167,6 +292,7 @@ final class CodexAppServerStdioProviderTests: XCTestCase {
         try await eventually("malformed stdout state") { snapshots.values.contains { $0.state == .unavailable("Codex app-server response was invalid") } }
         session.notify(method: "account/rateLimits/updated", params: validRateLimits())
         try await eventually("valid frame after malformed stdout") { snapshots.values.last?.state == .ready }
+        try await stop(provider, session: session)
     }
 
     func testRequestTimeoutPublishesUnavailableAndSchedulesFiveSecondRetry() async throws {
@@ -177,6 +303,9 @@ final class CodexAppServerStdioProviderTests: XCTestCase {
         await provider.start(mode: .realtime)
 
         try await eventually("request timeout") { snapshots.values.contains { $0.state == .unavailable("Codex app-server request timed out") } }
+        try await eventually("timeout force fallback") { scheduler.tasks(withDelay: 1).count == 1 }
+        scheduler.tasks(withDelay: 1)[0].fire()
+        try await eventually("retry after timeout process exit") { scheduler.delays.contains(5) }
         XCTAssertTrue(scheduler.delays.contains(5))
     }
 
@@ -200,6 +329,7 @@ final class CodexAppServerStdioProviderTests: XCTestCase {
         try await eventually("periodic realtime read") { session.messages.count >= 5 }
         XCTAssertEqual(factory.sessions.count, 1)
         XCTAssertEqual(try session.method(at: 4), "account/rateLimits/read")
+        try await stop(provider, session: session)
     }
 
     func testEnergySaverManualAndPeriodicRefreshCreateNewSessions() async throws {
@@ -207,14 +337,17 @@ final class CodexAppServerStdioProviderTests: XCTestCase {
         let scheduler = TestScheduler()
         let provider = CodexAppServerStdioProvider(candidate: testCandidate(), resolver: TestResolver(isTrusted: true), sessionFactory: factory, scheduler: scheduler, requestTimeout: 15)
         await provider.start(mode: .energySaver)
-        _ = try await completeHandshake(factory: factory, expectsTermination: true)
+        let first = try await completeHandshake(factory: factory, expectsTermination: true)
+        first.exit()
 
         await provider.refresh()
-        _ = try await completeHandshake(factory: factory, index: 1, expectsTermination: true)
+        let second = try await completeHandshake(factory: factory, index: 1, expectsTermination: true)
+        second.exit()
         let periodic = try XCTUnwrap(scheduler.tasks(withDelay: 600).last)
         periodic.fire()
         try await eventually("periodic energy connect") { factory.sessions.count == 3 }
         XCTAssertEqual(factory.sessions.count, 3)
+        try await stop(provider, session: try XCTUnwrap(factory.session(at: 2)))
     }
 
     func testRefreshDuringInitializeDoesNotSendRateLimitsReadEarly() async throws {
@@ -231,6 +364,7 @@ final class CodexAppServerStdioProviderTests: XCTestCase {
         try await eventually("post-handshake read") { session.messages.count >= 3 }
         XCTAssertEqual(try session.method(at: 1), "initialized")
         XCTAssertEqual(try session.method(at: 2), "account/rateLimits/read")
+        try await stop(provider, session: session)
     }
 
     func testFoundationSessionDrainsImmediateStdoutBeforeSingleExitCallback() async throws {
@@ -267,6 +401,16 @@ final class CodexAppServerStdioProviderTests: XCTestCase {
 
     private func testCandidate() -> ExecutableCandidate {
         ExecutableCandidate(canonicalURL: URL(fileURLWithPath: "/trusted/codex"), source: .path, ownerUID: 0, mode: 0o755, signingIdentifier: nil, teamIdentifier: nil, codeHash: "hash", deviceID: 1, inode: 1, inputURL: URL(fileURLWithPath: "/trusted/codex"))
+    }
+
+    private func stop(_ provider: CodexAppServerStdioProvider, session: TestSession) async throws {
+        let stopped = LockedFlag()
+        Task { await provider.stop(); stopped.set() }
+        try await eventually("test session termination") { stopped.value || session.terminated }
+        if !stopped.value {
+            session.exit()
+            try await eventually("test provider stop") { stopped.value }
+        }
     }
 }
 
@@ -366,6 +510,13 @@ private final class LockedEvents: @unchecked Sendable {
     private var storedValues: [String] = []
     var values: [String] { lock.withLock { storedValues } }
     func append(_ value: String) { lock.withLock { storedValues.append(value) } }
+}
+
+private final class LockedFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storedValue = false
+    var value: Bool { lock.withLock { storedValue } }
+    func set() { lock.withLock { storedValue = true } }
 }
 
 private enum TestWaitError: Error { case timedOut }

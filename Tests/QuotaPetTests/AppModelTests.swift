@@ -124,6 +124,9 @@ private final class TestUsageProvider: UsageProvider {
     func emit(_ snapshot: QuotaSnapshot) { continuation.yield(snapshot) }
     func start(mode: ConnectionMode) async { startedModes.append(mode) }
     func refresh() async {}
+    func recover(mode: ConnectionMode, restartIfStopped: Bool) async {
+        if restartIfStopped { await start(mode: mode) } else { await refresh() }
+    }
     func stop() async {}
 }
 

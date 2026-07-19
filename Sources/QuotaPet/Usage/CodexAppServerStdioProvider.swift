@@ -188,8 +188,8 @@ final class CodexAppServerStdioProvider: UsageProvider {
 
     func start(mode: ConnectionMode) async { await coordinator.start(mode: mode) }
     func refresh() async { await coordinator.refresh() }
+    func recover(mode: ConnectionMode, restartIfStopped: Bool) async { await coordinator.recover(mode: mode, restartIfStopped: restartIfStopped) }
     func stop() async { await coordinator.stop() }
-    func wake() async { await coordinator.refresh() }
     func standardErrorTail() async -> Data { await coordinator.standardErrorTail() }
 }
 
@@ -198,6 +198,11 @@ private actor UsageCoordinator {
         let generation: UInt64
         let session: any CodexAppServerSession
         let client: CodexRPCClient
+    }
+
+    private struct Operation {
+        let id: UInt64
+        let task: Task<Void, Never>
     }
 
     private let candidate: ExecutableCandidate
@@ -215,6 +220,9 @@ private actor UsageCoordinator {
     private var retryTask: (any UsageScheduledTask)?
     private var periodicTask: (any UsageScheduledTask)?
     private var forceTasks: [UInt64: any UsageScheduledTask] = [:]
+    private var terminationWaiters: [UInt64: [CheckedContinuation<Void, Never>]] = [:]
+    private var operation: Operation?
+    private var nextOperationID: UInt64 = 0
     private var policy = RefreshPolicy()
 
     init(candidate: ExecutableCandidate, resolver: any UsageExecutableResolving, sessionFactory: any CodexAppServerSessionFactory, scheduler: any UsageScheduling, requestTimeout: TimeInterval, publish: @escaping (QuotaSnapshot) -> Void) {
@@ -227,31 +235,94 @@ private actor UsageCoordinator {
     }
 
     func start(mode newMode: ConnectionMode) async {
-        if mode == newMode, (connection != nil || connecting) { return }
-        stopCurrentConnection()
+        if mode == newMode, (connection != nil || connecting || operation != nil) { return }
+        retryTask?.cancel()
+        retryTask = nil
+        await stopCurrentConnection()
+        guard !Task.isCancelled else { return }
         mode = newMode
         schedulePeriodicRefresh()
-        Task { await self.connect() }
+        beginConnect()
     }
 
     func refresh() async {
         guard mode != nil else { return }
+        if let task = operation?.task {
+            guard mode == .energySaver, connection == nil else { return }
+            await task.value
+        }
+        guard !Task.isCancelled, mode != nil else { return }
+        await waitForTerminations()
+        guard !Task.isCancelled, mode != nil else { return }
         if let connection, mode == .realtime {
             guard !handshaking, !reading else { return }
             reading = true
-            Task { await self.readRateLimits(connection) }
+            beginRead(connection)
         } else if !connecting {
-            Task { await self.connect() }
+            beginConnect()
         }
     }
 
-    func stop() {
+    func recover(mode newMode: ConnectionMode, restartIfStopped: Bool) async {
+        if mode == nil {
+            guard restartIfStopped else { return }
+            mode = newMode
+            schedulePeriodicRefresh()
+        } else if mode != newMode {
+            await start(mode: newMode)
+        }
+
+        if let task = operation?.task {
+            await task.value
+        }
+        guard !Task.isCancelled, mode != nil else { return }
+
+        await waitForTerminations()
+        guard !Task.isCancelled, mode != nil else { return }
+        if let connection, mode == .realtime {
+            guard !handshaking, !reading else { return }
+            reading = true
+            beginRead(connection)
+        } else if !connecting {
+            beginConnect()
+        }
+        await operation?.task.value
+    }
+
+    func stop() async {
         mode = nil
         retryTask?.cancel()
         periodicTask?.cancel()
         retryTask = nil
         periodicTask = nil
-        stopCurrentConnection()
+        await stopCurrentConnection()
+    }
+
+    private func beginConnect() {
+        guard operation == nil else { return }
+        nextOperationID += 1
+        let id = nextOperationID
+        let task = Task { [weak self] in
+            await self?.connect()
+            await self?.operationCompleted(id: id)
+        }
+        operation = Operation(id: id, task: task)
+    }
+
+    private func beginRead(_ connection: Connection) {
+        guard operation == nil else { return }
+        nextOperationID += 1
+        let id = nextOperationID
+        let task = Task { [weak self] in
+            await self?.readRateLimits(connection)
+            await self?.operationCompleted(id: id)
+        }
+        operation = Operation(id: id, task: task)
+    }
+
+    private func operationCompleted(id: UInt64) {
+        guard operation?.id == id else { return }
+        operation = nil
     }
 
     private func connect() async {
@@ -302,7 +373,7 @@ private actor UsageCoordinator {
         } catch {
             connecting = false
             handshaking = false
-            fail(error, generation: currentGeneration)
+            await fail(error, generation: currentGeneration)
         }
     }
 
@@ -312,9 +383,9 @@ private actor UsageCoordinator {
             let data = try await connection.client.request(method: "account/rateLimits/read")
             guard self.connection?.generation == connection.generation else { return }
             publishParsed(data)
-            if mode == .energySaver { closeEnergyConnection(connection) }
+            if mode == .energySaver { await closeEnergyConnection(connection) }
         } catch {
-            fail(error, generation: connection.generation)
+            await fail(error, generation: connection.generation)
         }
     }
 
@@ -338,12 +409,13 @@ private actor UsageCoordinator {
         publishParsed(data)
     }
 
-    private func sessionExited(generation: UInt64) {
-        cancelForceTask(for: generation)
-        guard connection?.generation == generation else { return }
+    private func sessionExited(generation: UInt64) async {
+        completeTermination(generation: generation)
+        guard let exited = connection, exited.generation == generation else { return }
         connection = nil
         handshaking = false
         reading = false
+        await exited.client.cancelPending()
         publishState(.unavailable("Codex app-server exited"))
         scheduleRetry()
     }
@@ -365,11 +437,9 @@ private actor UsageCoordinator {
         }
     }
 
-    private func fail(_ error: Error, generation: UInt64) {
+    private func fail(_ error: Error, generation: UInt64) async {
         guard connection?.generation == generation || connecting else { return }
-        if connection?.generation == generation {
-            closeConnection()
-        }
+        let shouldClose = connection?.generation == generation
         connecting = false
         handshaking = false
         reading = false
@@ -380,6 +450,7 @@ private actor UsageCoordinator {
             state = .unavailable("Codex app-server request failed")
         }
         publishState(state)
+        if shouldClose { await closeConnection() }
         scheduleRetry()
     }
 
@@ -388,7 +459,7 @@ private actor UsageCoordinator {
         retryTask?.cancel()
         let delay = policy.recordFailure()
         retryTask = scheduler.schedule(after: delay) { [weak self] in
-            Task { await self?.refresh() }
+            Task { await self?.scheduledRecovery() }
         }
     }
 
@@ -401,40 +472,71 @@ private actor UsageCoordinator {
 
     private func periodicRefreshFired() async {
         schedulePeriodicRefresh()
-        await refresh()
+        await scheduledRecovery()
     }
 
-    private func closeEnergyConnection(_ current: Connection) {
+    private func scheduledRecovery() async {
+        guard let mode else { return }
+        await recover(mode: mode, restartIfStopped: false)
+    }
+
+    private func closeEnergyConnection(_ current: Connection) async {
         guard connection?.generation == current.generation else { return }
         connection = nil
-        gracefullyTerminate(current)
+        await gracefullyTerminate(current)
     }
 
-    private func stopCurrentConnection() {
+    private func stopCurrentConnection() async {
         generation += 1
-        closeConnection()
+        operation?.task.cancel()
+        operation = nil
         connecting = false
         handshaking = false
         reading = false
+        await closeConnection()
+        await waitForTerminations()
     }
 
-    private func closeConnection() {
+    private func closeConnection() async {
         guard let current = connection else { return }
         connection = nil
-        gracefullyTerminate(current)
+        await gracefullyTerminate(current)
     }
 
-    private func gracefullyTerminate(_ connection: Connection) {
-        connection.session.closeInput()
-        connection.session.terminate()
+    private func gracefullyTerminate(_ connection: Connection) async {
         let generation = connection.generation
-        forceTasks[generation] = scheduler.schedule(after: 1) { [weak session = connection.session] in
-            session?.forceTerminate()
+        await withCheckedContinuation { continuation in
+            terminationWaiters[generation, default: []].append(continuation)
+            guard forceTasks[generation] == nil else { return }
+            connection.session.closeInput()
+            connection.session.terminate()
+            forceTasks[generation] = scheduler.schedule(after: 1) { [weak self, weak session = connection.session] in
+                session?.forceTerminate()
+                Task { await self?.forceDeadlineReached(generation: generation) }
+            }
         }
     }
 
-    private func cancelForceTask(for generation: UInt64) {
+    private func forceDeadlineReached(generation: UInt64) {
+        completeTermination(generation: generation)
+    }
+
+    private func completeTermination(generation: UInt64) {
         forceTasks.removeValue(forKey: generation)?.cancel()
+        let waiters = terminationWaiters.removeValue(forKey: generation) ?? []
+        waiters.forEach { $0.resume() }
+    }
+
+    private func waitForTerminations() async {
+        for generation in Array(terminationWaiters.keys) {
+            await withCheckedContinuation { continuation in
+                guard terminationWaiters[generation] != nil else {
+                    continuation.resume()
+                    return
+                }
+                terminationWaiters[generation, default: []].append(continuation)
+            }
+        }
     }
 
     func standardErrorTail() async -> Data {

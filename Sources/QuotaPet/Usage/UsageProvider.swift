@@ -4,6 +4,7 @@ protocol UsageProvider: AnyObject {
     var snapshots: AsyncStream<QuotaSnapshot> { get }
     func start(mode: ConnectionMode) async
     func refresh() async
+    func recover(mode: ConnectionMode, restartIfStopped: Bool) async
     func stop() async
 }
 

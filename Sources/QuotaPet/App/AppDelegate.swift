@@ -26,6 +26,35 @@ struct LifecycleRecoveryPolicy {
 }
 
 @MainActor
+final class LifecycleRecoveryCoordinator {
+    private var transitionTask: Task<Void, Never>?
+
+    func enqueue(_ operation: @escaping @MainActor () async -> Void) {
+        let predecessor = transitionTask
+        transitionTask = Task {
+            await predecessor?.value
+            guard !Task.isCancelled else { return }
+            await operation()
+        }
+    }
+
+    func interrupt(_ operation: @escaping @MainActor () async -> Void) {
+        transitionTask?.cancel()
+        transitionTask = Task { await operation() }
+    }
+
+    func interruptAndWait(_ operation: @escaping @MainActor () async -> Void) async {
+        interrupt(operation)
+        await transitionTask?.value
+    }
+
+    func cancel() {
+        transitionTask?.cancel()
+        transitionTask = nil
+    }
+}
+
+@MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var composition: AppComposition?
     private var statusController: StatusItemController?
@@ -39,8 +68,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var notificationPolicy = NotificationPolicy()
     private var notificationSubscription: AnyCancellable?
     private var preferenceSubscriptions = Set<AnyCancellable>()
-    private var providerTransitionTask: Task<Void, Never>?
+    private let lifecycleCoordinator = LifecycleRecoveryCoordinator()
     private var recoveryQueued = false
+    private var recoveryGeneration: UInt64 = 0
     private var recoveryPolicy = LifecycleRecoveryPolicy()
     private var isTerminating = false
     private var workspaceObservers: [NSObjectProtocol] = []
@@ -98,7 +128,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         isTerminating = true
         stopLifecycleObservers()
         globalHotKey?.invalidate()
-        providerTransitionTask?.cancel()
+        lifecycleCoordinator.cancel()
         notificationSubscription?.cancel()
         preferenceSubscriptions.removeAll()
         floatingPetController = nil
@@ -167,18 +197,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard !isTerminating else { return }
         isTerminating = true
         stopLifecycleObservers()
+        recoveryGeneration += 1
         recoveryQueued = false
-        await providerTransitionTask?.value
-        await composition?.model.stop()
+        await lifecycleCoordinator.interruptAndWait { [weak self] in
+            await self?.composition?.model.stop()
+        }
     }
 
     private func enqueueProviderTransition(_ operation: @escaping @MainActor () async -> Void) {
-        let predecessor = providerTransitionTask
-        providerTransitionTask = Task {
-            await predecessor?.value
-            guard !Task.isCancelled else { return }
-            await operation()
-        }
+        lifecycleCoordinator.enqueue(operation)
     }
 
     private func startLifecycleObservers() {
@@ -211,36 +238,48 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func handleSleep() {
         guard !isTerminating, recoveryPolicy.willSleep() else { return }
-        enqueueProviderTransition { [weak self] in await self?.composition?.model.stop() }
+        recoveryGeneration += 1
+        recoveryQueued = false
+        lifecycleCoordinator.interrupt { [weak self] in await self?.composition?.model.stop() }
     }
 
     private func handleWake() {
         guard !isTerminating, recoveryPolicy.didWake() else { return }
-        queueRecovery()
+        queueRecovery(.wake)
     }
 
     private func handleNetworkChange(isSatisfied: Bool) {
         guard !isTerminating else { return }
-        if recoveryPolicy.networkChanged(isSatisfied: isSatisfied) { queueRecovery() }
+        if recoveryPolicy.networkChanged(isSatisfied: isSatisfied) { queueRecovery(.network) }
     }
 
-    private func queueRecovery() {
+    private enum RecoveryKind {
+        case wake
+        case network
+    }
+
+    private func queueRecovery(_ kind: RecoveryKind) {
         guard !recoveryQueued, !isTerminating else { return }
+        recoveryGeneration += 1
+        let generation = recoveryGeneration
         recoveryQueued = true
         enqueueProviderTransition { [weak self] in
             guard let self else { return }
-            defer { self.recoveryQueued = false }
-            guard !self.isTerminating, !self.recoveryPolicy.isSleeping else { return }
-            let model = self.composition?.model
-            if let mode = self.preferences?.connectionMode {
-                await model?.setConnectionMode(mode)
+            defer {
+                if self.recoveryGeneration == generation { self.recoveryQueued = false }
             }
-            await model?.start()
+            guard !self.isTerminating, !self.recoveryPolicy.isSleeping else { return }
+            guard let model = self.composition?.model else { return }
+            switch kind {
+            case .wake:
+                await model.recoverAfterWake(mode: self.preferences?.connectionMode ?? model.connectionMode)
+            case .network:
+                await model.recoverAfterNetwork()
+            }
             guard !self.isTerminating, !self.recoveryPolicy.isSleeping else {
-                await model?.stop()
+                await model.stop()
                 return
             }
-            await model?.refresh()
         }
     }
 }

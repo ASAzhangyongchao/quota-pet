@@ -100,6 +100,15 @@ actor CodexRPCClient {
         standardError
     }
 
+    func cancelPending() {
+        let requests = pending
+        pending.removeAll()
+        for request in requests.values {
+            request.timeoutTask.cancel()
+            request.continuation.resume(throwing: CancellationError())
+        }
+    }
+
     private func enqueue(id: Int, payload: Data) async throws -> Data {
         try await withTaskCancellationHandler(operation: {
             if Task.isCancelled {
