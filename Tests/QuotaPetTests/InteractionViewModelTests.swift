@@ -75,24 +75,40 @@ final class InteractionViewModelTests: XCTestCase {
 
     func testRefreshTimeoutShowsNoticeThenRecoversOnce() async throws {
         var recoverCount = 0
+        var recoverCountAtNotice = -1
         let details = UsageDetailsViewModel(
             snapshot: makeSnapshot(used: 10),
-            refreshTimeoutNanoseconds: 20_000_000,
-            recoverNoticeNanoseconds: 20_000_000
+            refreshTimeoutNanoseconds: 50_000_000,
+            recoverNoticeNanoseconds: 50_000_000
         )
+        let noticeSeen = expectation(description: "timeout notice")
+        let recoveringSeen = expectation(description: "recovering")
+        var subscriptions = Set<AnyCancellable>()
+        details.$refreshFeedback
+            .dropFirst()
+            .sink { feedback in
+                if feedback == .timeoutNotice {
+                    recoverCountAtNotice = recoverCount
+                    noticeSeen.fulfill()
+                }
+                if feedback == .recovering {
+                    recoveringSeen.fulfill()
+                }
+            }
+            .store(in: &subscriptions)
 
         details.beginRefresh {
             recoverCount += 1
         }
         XCTAssertEqual(details.refreshFeedback, .refreshing)
 
-        try await waitUntil(timeout: 1) { details.refreshFeedback == .timeoutNotice }
-        XCTAssertEqual(recoverCount, 0)
+        await fulfillment(of: [noticeSeen], timeout: 2)
+        XCTAssertEqual(recoverCountAtNotice, 0)
 
-        try await waitUntil(timeout: 1) { details.refreshFeedback == .recovering }
+        await fulfillment(of: [recoveringSeen], timeout: 2)
         XCTAssertEqual(recoverCount, 1)
 
-        try await Task.sleep(nanoseconds: 80_000_000)
+        try await Task.sleep(nanoseconds: 150_000_000)
         XCTAssertEqual(recoverCount, 1)
     }
 
@@ -111,16 +127,6 @@ final class InteractionViewModelTests: XCTestCase {
         try await Task.sleep(nanoseconds: 120_000_000)
         XCTAssertEqual(recoverCount, 0)
     }
-}
-
-@MainActor
-private func waitUntil(timeout: TimeInterval, condition: @escaping () -> Bool) async throws {
-    let deadline = Date().addingTimeInterval(timeout)
-    while Date() < deadline {
-        if condition() { return }
-        try await Task.sleep(nanoseconds: 5_000_000)
-    }
-    XCTFail("condition not met before timeout")
 }
 
 private func makeSnapshot(used: Double) -> QuotaSnapshot {
