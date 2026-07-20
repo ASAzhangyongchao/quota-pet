@@ -119,6 +119,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         registerHotKey()
         preferences.$connectionMode.dropFirst().sink { [weak self] mode in self?.applyConnectionMode(mode) }.store(in: &preferenceSubscriptions)
+        preferences.$petVisible.dropFirst().sink { [weak self] visible in
+            Task { @MainActor in self?.composition?.model.setPetVisible(visible) }
+        }.store(in: &preferenceSubscriptions)
         preferences.$hotKey.dropFirst().sink { [weak self] _ in self?.registerHotKey() }.store(in: &preferenceSubscriptions)
         preferences.$notificationsEnabled.dropFirst().sink { [weak self] enabled in
             if enabled { self?.localNotifications?.requestAuthorization() }

@@ -106,6 +106,7 @@ struct AnimationResetGeneration {
 final class FloatingPetController: NSObject, NSWindowDelegate {
     private let model: AppModel
     private let preferences: Preferences
+    private let connectionOffer: CodexConnectionOffer?
     private let panel: NSPanel
     private let detailsViewModel: UsageDetailsViewModel
     private var latestRenderState: PetRenderState
@@ -128,8 +129,9 @@ final class FloatingPetController: NSObject, NSWindowDelegate {
     init(model: AppModel, preferences: Preferences, connectionOffer: CodexConnectionOffer? = nil) {
         self.model = model
         self.preferences = preferences
-        detailsViewModel = UsageDetailsViewModel(snapshot: model.snapshot)
-        latestRenderState = PetRenderState(snapshot: model.snapshot)
+        self.connectionOffer = connectionOffer
+        detailsViewModel = UsageDetailsViewModel(snapshot: model.snapshot, language: preferences.resolvedLanguage)
+        latestRenderState = PetRenderState(snapshot: model.snapshot, language: preferences.resolvedLanguage)
         panel = NSPanel(contentRect: NSRect(origin: .zero, size: FloatingPetPanelContract.default.size), styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         super.init()
         petView = PetAppKitView(
@@ -146,8 +148,10 @@ final class FloatingPetController: NSObject, NSWindowDelegate {
             let hostingView = NSHostingView(rootView: UsagePopoverView(
                 viewModel: self.detailsViewModel,
                 onPetTap: { [weak self] in self?.collapseDetail() },
-                connectionOffer: connectionOffer,
-                onRefresh: { [weak self] in Task { await self?.model.refresh() } }
+                connectionOffer: self.connectionOffer,
+                onRefresh: { [weak self] in
+                    Task { await self?.model.refresh() }
+                }
             ))
             return DetailGlowContainerView(
                 hostedView: hostingView,
@@ -158,7 +162,7 @@ final class FloatingPetController: NSObject, NSWindowDelegate {
         installCollapsedView()
         snapshotSubscription = model.$snapshot.sink { [weak self] snapshot in
             guard let self else { return }
-            self.latestRenderState = PetRenderState(snapshot: snapshot)
+            self.latestRenderState = PetRenderState(snapshot: snapshot, language: self.preferences.resolvedLanguage)
             self.petView.update(renderState: self.latestRenderState)
             self.updateGlowStyle(snapshot: snapshot)
             self.detailsViewModel.update(snapshot)
@@ -166,7 +170,12 @@ final class FloatingPetController: NSObject, NSWindowDelegate {
             self.scheduleIdleBlink()
         }
         Publishers.CombineLatest4(preferences.$petVisible, preferences.$alwaysOnTop, preferences.$ignoresMouseEvents, preferences.$connectionMode)
+            .receive(on: RunLoop.main)
             .sink { [weak self] _, _, _, _ in self?.applyPreferences() }
+            .store(in: &preferencesSubscriptions)
+        preferences.$languagePreference
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.applyLanguage() }
             .store(in: &preferencesSubscriptions)
         screenObserver = NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in self?.clampToScreen() }
@@ -225,6 +234,22 @@ final class FloatingPetController: NSObject, NSWindowDelegate {
         collapsedContainer.layoutSubtreeIfNeeded()
     }
 
+    private func applyLanguage() {
+        let language = preferences.resolvedLanguage
+        detailsViewModel.setLanguage(language)
+        detailsViewModel.update(model.snapshot)
+        latestRenderState = PetRenderState(snapshot: model.snapshot, language: language)
+        petView.update(renderState: latestRenderState)
+        if let hosting = (detailHosting.expandedValue as? DetailGlowContainerView)?.hostedView as? NSHostingView<UsagePopoverView> {
+            hosting.rootView = UsagePopoverView(
+                viewModel: detailsViewModel,
+                onPetTap: { [weak self] in self?.collapseDetail() },
+                connectionOffer: connectionOffer,
+                onRefresh: { [weak self] in Task { await self?.model.refresh() } }
+            )
+        }
+    }
+
     private func applyPreferences() {
         panel.level = preferences.alwaysOnTop ? .floating : .normal
         panel.collectionBehavior = preferences.alwaysOnTop ? [.canJoinAllSpaces, .fullScreenAuxiliary] : []
@@ -238,7 +263,9 @@ final class FloatingPetController: NSObject, NSWindowDelegate {
             panel.orderFrontRegardless()
             scheduleIdleBlink()
         } else {
-            cancelAnimationAndIdle(); panel.orderOut(nil)
+            if detailState.detailVisible { collapseDetail() }
+            cancelAnimationAndIdle()
+            panel.orderOut(nil)
         }
     }
 

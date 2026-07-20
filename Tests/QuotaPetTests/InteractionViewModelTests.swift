@@ -72,6 +72,55 @@ final class InteractionViewModelTests: XCTestCase {
         await fulfillment(of: [restored], timeout: 1)
         XCTAssertEqual(details.refreshFeedback, .idle)
     }
+
+    func testRefreshTimeoutShowsNoticeThenRecoversOnce() async throws {
+        var recoverCount = 0
+        let details = UsageDetailsViewModel(
+            snapshot: makeSnapshot(used: 10),
+            refreshTimeoutNanoseconds: 20_000_000,
+            recoverNoticeNanoseconds: 20_000_000
+        )
+
+        details.beginRefresh {
+            recoverCount += 1
+        }
+        XCTAssertEqual(details.refreshFeedback, .refreshing)
+
+        try await waitUntil(timeout: 1) { details.refreshFeedback == .timeoutNotice }
+        XCTAssertEqual(recoverCount, 0)
+
+        try await waitUntil(timeout: 1) { details.refreshFeedback == .recovering }
+        XCTAssertEqual(recoverCount, 1)
+
+        try await Task.sleep(nanoseconds: 80_000_000)
+        XCTAssertEqual(recoverCount, 1)
+    }
+
+    func testRefreshTimeoutDoesNotRecoverAfterSuccessfulSnapshot() async throws {
+        var recoverCount = 0
+        let details = UsageDetailsViewModel(
+            snapshot: makeSnapshot(used: 10),
+            refreshTimeoutNanoseconds: 50_000_000,
+            recoverNoticeNanoseconds: 20_000_000
+        )
+
+        details.beginRefresh { recoverCount += 1 }
+        details.update(makeSnapshot(used: 20))
+        XCTAssertEqual(details.refreshFeedback, .succeeded)
+
+        try await Task.sleep(nanoseconds: 120_000_000)
+        XCTAssertEqual(recoverCount, 0)
+    }
+}
+
+@MainActor
+private func waitUntil(timeout: TimeInterval, condition: @escaping () -> Bool) async throws {
+    let deadline = Date().addingTimeInterval(timeout)
+    while Date() < deadline {
+        if condition() { return }
+        try await Task.sleep(nanoseconds: 5_000_000)
+    }
+    XCTFail("condition not met before timeout")
 }
 
 private func makeSnapshot(used: Double) -> QuotaSnapshot {
