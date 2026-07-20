@@ -40,13 +40,15 @@ final class Preferences: ObservableObject {
         static let hotKey = "QuotaPet.hotKey"
         static let notificationsEnabled = "QuotaPet.notificationsEnabled"
         static let launchAtLoginEnabled = "QuotaPet.launchAtLoginEnabled"
+        static let languagePreference = "QuotaPet.languagePreference"
         static let position = "QuotaPet.normalizedPosition"
         static let fingerprints = "QuotaPet.confirmedFingerprints"
     }
 
     private let store: any AppPreferenceStoring
-    private let language: AppLanguage
-    @Published var petVisible: Bool { didSet { store.set(petVisible, forKey: Key.petVisible) } }
+    @Published var petVisible: Bool {
+        didSet { store.set(petVisible, forKey: Key.petVisible) }
+    }
     @Published var alwaysOnTop: Bool { didSet { store.set(alwaysOnTop, forKey: Key.alwaysOnTop) } }
     @Published var ignoresMouseEvents: Bool { didSet { store.set(ignoresMouseEvents, forKey: Key.ignoresMouseEvents) } }
     @Published var connectionMode: ConnectionMode { didSet { store.set(connectionMode.rawValue, forKey: Key.connectionMode) } }
@@ -55,21 +57,28 @@ final class Preferences: ObservableObject {
     @Published var notificationsEnabled: Bool { didSet { store.set(notificationsEnabled, forKey: Key.notificationsEnabled) } }
     @Published private(set) var launchAtLoginEnabled: Bool
     @Published private(set) var launchAtLoginErrorMessage: String?
+    @Published var languagePreference: LanguagePreference {
+        didSet { store.set(languagePreference.rawValue, forKey: Key.languagePreference) }
+    }
     @Published var normalizedPosition: NormalizedScreenPosition? { didSet { persist(normalizedPosition, key: Key.position) } }
     @Published var confirmedFingerprints: Set<TrustFingerprint> { didSet { persist(confirmedFingerprints, key: Key.fingerprints) } }
 
-    init(store: any AppPreferenceStoring = UserDefaults.standard, language: AppLanguage = .current) {
+    var resolvedLanguage: AppLanguage {
+        AppLanguage.resolve(preference: languagePreference)
+    }
+
+    init(store: any AppPreferenceStoring = UserDefaults.standard) {
         self.store = store
-        self.language = language
-        petVisible = store.object(forKey: Key.petVisible) as? Bool ?? true
-        alwaysOnTop = store.object(forKey: Key.alwaysOnTop) as? Bool ?? true
-        ignoresMouseEvents = store.object(forKey: Key.ignoresMouseEvents) as? Bool ?? false
+        petVisible = Self.boolValue(from: store, key: Key.petVisible, default: true)
+        alwaysOnTop = Self.boolValue(from: store, key: Key.alwaysOnTop, default: true)
+        ignoresMouseEvents = Self.boolValue(from: store, key: Key.ignoresMouseEvents, default: false)
         connectionMode = ConnectionMode(rawValue: store.object(forKey: Key.connectionMode) as? String ?? "") ?? .energySaver
         hotKey = Self.load(HotKeyShortcut.self, from: store, key: Key.hotKey) ?? .optionCommandU
         hotKeyStatusMessage = nil
         notificationsEnabled = store.object(forKey: Key.notificationsEnabled) as? Bool ?? false
         launchAtLoginEnabled = store.object(forKey: Key.launchAtLoginEnabled) as? Bool ?? false
         launchAtLoginErrorMessage = nil
+        languagePreference = LanguagePreference(rawValue: store.object(forKey: Key.languagePreference) as? String ?? "") ?? .system
         normalizedPosition = Self.load(NormalizedScreenPosition.self, from: store, key: Key.position)
         confirmedFingerprints = Self.load(Set<TrustFingerprint>.self, from: store, key: Key.fingerprints) ?? []
     }
@@ -77,8 +86,8 @@ final class Preferences: ObservableObject {
     func setHotKeyRegistration(_ result: Result<Void, GlobalHotKeyError>) {
         switch result {
         case .success: hotKeyStatusMessage = nil
-        case .failure(.occupied): hotKeyStatusMessage = L10n.text(.hotkeyOccupied, language: language)
-        case .failure: hotKeyStatusMessage = L10n.text(.hotkeyRegistrationFailed, language: language)
+        case .failure(.occupied): hotKeyStatusMessage = L10n.text(.hotkeyOccupied, language: resolvedLanguage)
+        case .failure: hotKeyStatusMessage = L10n.text(.hotkeyRegistrationFailed, language: resolvedLanguage)
         }
     }
 
@@ -90,6 +99,13 @@ final class Preferences: ObservableObject {
 
     private func persist<T: Encodable>(_ value: T?, key: String) {
         store.set(try? JSONEncoder().encode(value), forKey: key)
+    }
+
+    private static func boolValue(from store: any AppPreferenceStoring, key: String, default defaultValue: Bool) -> Bool {
+        guard let value = store.object(forKey: key) else { return defaultValue }
+        if let bool = value as? Bool { return bool }
+        if let number = value as? NSNumber { return number.boolValue }
+        return defaultValue
     }
 
     private static func load<T: Decodable>(_ type: T.Type, from store: any AppPreferenceStoring, key: String) -> T? {

@@ -29,10 +29,17 @@ final class AppModel: NSObject, ObservableObject {
         self.provider = provider
         self.store = store
         connectionMode = ConnectionMode(rawValue: store.object(forKey: Key.connectionMode) as? String ?? "") ?? .energySaver
-        petVisible = store.object(forKey: Key.petVisible) as? Bool ?? true
+        petVisible = Self.boolValue(from: store, key: Key.petVisible, default: true)
         snapshot = QuotaSnapshot(planType: nil, windows: [], updatedAt: .distantPast, state: .loading)
         lastError = nil
         super.init()
+    }
+
+    private static func boolValue(from store: any AppPreferenceStoring, key: String, default defaultValue: Bool) -> Bool {
+        guard let value = store.object(forKey: key) else { return defaultValue }
+        if let bool = value as? Bool { return bool }
+        if let number = value as? NSNumber { return number.boolValue }
+        return defaultValue
     }
 
     deinit {
@@ -45,7 +52,7 @@ final class AppModel: NSObject, ObservableObject {
     }
 
     func refresh() async {
-        await provider.refresh()
+        await provider.recover(mode: connectionMode, restartIfStopped: true)
     }
 
     func recoverAfterWake(mode: ConnectionMode) async {

@@ -4,7 +4,29 @@
 
 All notable changes follow Semantic Versioning.
 
-## [0.1.3] - Unreleased
+## [0.1.4] - Unreleased
+
+### Added
+
+- Manual refresh timeout notice before a single automatic reconnect.
+- Scrollable, wider Settings with grouped sections and hover help on toggles.
+- Settings language override: System / 简体中文 / English with live UI updates.
+- Menu bar Help and About actions; popover positioning that stays below the menu bar.
+
+### Changed
+
+- Manual refresh recovers a stopped provider instead of no-op spinning.
+- Trust paths in Settings wrap and remain selectable instead of truncating to ellipsis.
+- Updated the public metadata to version 0.1.4 build 7.
+
+### Fixed
+
+- User guide links point at `ASAzhangyongchao/quota-pet`.
+- Right-click menu language refreshes from the current Settings language before opening.
+- Settings pickers no longer clip leading label characters.
+- Pet visibility toggle reads legacy numeric defaults correctly; detail card language updates live while expanded.
+
+## [0.1.3] - 2026-07-20
 
 ### Added
 

@@ -16,9 +16,23 @@ enum AppLanguage: String, CaseIterable, Equatable {
         return .english
     }
 
+    static func resolve(preference: LanguagePreference, preferredLanguage: String? = Locale.preferredLanguages.first) -> AppLanguage {
+        switch preference {
+        case .system: resolve(preferredLanguage: preferredLanguage)
+        case .simplifiedChinese: .simplifiedChinese
+        case .english: .english
+        }
+    }
+
     var locale: Locale {
         Locale(identifier: rawValue)
     }
+}
+
+enum LanguagePreference: String, CaseIterable, Codable, Equatable {
+    case system
+    case simplifiedChinese
+    case english
 }
 
 enum L10n {
@@ -52,6 +66,8 @@ enum L10n {
         case refreshNow = "action.refresh_now"
         case refreshing = "action.refreshing"
         case refreshSucceeded = "action.refresh_succeeded"
+        case refreshTimeoutNotice = "action.refresh_timeout_notice"
+        case refreshRecovering = "action.refresh_recovering"
         case ringUnavailable = "ring.unavailable"
         case ringRemaining = "ring.remaining"
         case ringRemainingReset = "ring.remaining_reset"
@@ -69,11 +85,20 @@ enum L10n {
         case menuEnergySaver = "menu.energy_saver"
         case menuRecoverInteraction = "menu.recover_interaction"
         case menuSettings = "menu.settings"
+        case menuHelp = "menu.help"
+        case menuAbout = "menu.about"
         case menuQuit = "menu.quit"
         case settingsTitle = "settings.title"
+        case settingsSectionAppearance = "settings.section.appearance"
+        case settingsSectionConnection = "settings.section.connection"
+        case settingsSectionNotifications = "settings.section.notifications"
+        case settingsSectionLanguage = "settings.section.language"
         case settingsShowPet = "settings.show_pet"
+        case settingsShowPetHelp = "settings.show_pet.help"
         case settingsAlwaysOnTop = "settings.always_on_top"
+        case settingsAlwaysOnTopHelp = "settings.always_on_top.help"
         case settingsMousePassthrough = "settings.mouse_passthrough"
+        case settingsMousePassthroughHelp = "settings.mouse_passthrough.help"
         case settingsConnectionMode = "settings.connection_mode"
         case settingsRealtime = "settings.realtime"
         case settingsEnergySaver = "settings.energy_saver"
@@ -81,7 +106,13 @@ enum L10n {
         case settingsShortcut = "settings.shortcut"
         case settingsResetShortcut = "settings.reset_shortcut"
         case settingsNotifications = "settings.notifications"
+        case settingsNotificationsHelp = "settings.notifications.help"
         case settingsLaunchAtLogin = "settings.launch_at_login"
+        case settingsLaunchAtLoginHelp = "settings.launch_at_login.help"
+        case settingsLanguage = "settings.language"
+        case settingsLanguageSystem = "settings.language.system"
+        case settingsLanguageChinese = "settings.language.chinese"
+        case settingsLanguageEnglish = "settings.language.english"
         case settingsCodexTrust = "settings.codex_trust"
         case settingsCandidateDetails = "settings.candidate_details"
         case settingsNone = "settings.none"
@@ -92,6 +123,9 @@ enum L10n {
         case settingsAboutLegal = "settings.about_legal"
         case settingsUnofficialNotice = "settings.unofficial_notice"
         case settingsMarksNotice = "settings.marks_notice"
+        case aboutTitle = "about.title"
+        case aboutVersion = "about.version"
+        case aboutOK = "about.ok"
         case hotkeyOccupied = "hotkey.occupied"
         case hotkeyRegistrationFailed = "hotkey.registration_failed"
         case notificationTitle = "notification.title"

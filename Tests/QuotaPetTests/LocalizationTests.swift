@@ -44,4 +44,23 @@ final class LocalizationTests: XCTestCase {
         )
         XCTAssertFalse(L10n.text(.settingsMarksNotice, language: .simplifiedChinese).isEmpty)
     }
+
+    func testRefreshAndSettingsHelpStringsExistInBothLanguages() {
+        XCTAssertEqual(L10n.text(.refreshTimeoutNotice, language: .simplifiedChinese), "刷新超时，即将重新连接…")
+        XCTAssertEqual(L10n.text(.refreshRecovering, language: .english), "Reconnecting…")
+        XCTAssertFalse(L10n.text(.settingsShowPetHelp, language: .english).isEmpty)
+        XCTAssertFalse(L10n.text(.menuHelp, language: .simplifiedChinese).isEmpty)
+        XCTAssertEqual(L10n.text(.menuAbout, language: .english), "About")
+    }
+
+    func testUserGuideRemoteURLsUsePublicQuotaPetRepository() {
+        XCTAssertEqual(
+            UserGuide.remoteURL(language: .simplifiedChinese).absoluteString,
+            "https://github.com/ASAzhangyongchao/quota-pet/blob/main/docs/USER_GUIDE.zh-CN.md"
+        )
+        XCTAssertEqual(
+            UserGuide.remoteURL(language: .english).absoluteString,
+            "https://github.com/ASAzhangyongchao/quota-pet/blob/main/docs/USER_GUIDE.md"
+        )
+    }
 }

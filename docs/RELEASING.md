@@ -75,6 +75,6 @@ The generated cask pins the versioned GitHub Release URL and literal DMG SHA256;
 
 Do not rewrite or delete a published tag. If a release is unsafe, mark it clearly in GitHub, remove it from the Homebrew tap, and publish a higher patch version containing the correction. Users can temporarily reinstall a previously verified versioned artifact. Preserve checksums, release notes, and the Git history for auditability.
 
-## Current 0.1.3 status
+## Current 0.1.4 status
 
-Version 0.1.3 build 4 may be built and installed locally. Do not tag or publish it until the signing, notarization, protected-environment, legal-review, and clean-machine prerequisites above are actually available.
+Version 0.1.4 build 7 may be built and installed locally. Do not tag or publish it until the signing, notarization, protected-environment, legal-review, and clean-machine prerequisites above are actually available.

@@ -14,7 +14,9 @@ If no usage is available, QuotaPet shows the Codex executable it found. Confirm 
 - Click the pet at the detail card's top-left: collapse details.
 - Drag either state: move the whole window. The pet stays attached to the same top-left anchor and the window remains fully inside the current display.
 - Click the menu bar ring: open or close the compact usage popover.
-- Right-click the menu bar ring: refresh, show or hide the pet, select a connection mode, restore interaction, open Settings, or quit.
+- Right-click the menu bar ring: refresh, show or hide the pet, select a connection mode, restore interaction, open Settings, User guide, About, or quit.
+- In Settings, choose System / 简体中文 / English; menus, details, and refresh states update immediately.
+- If a refresh stays pending too long, QuotaPet shows a reconnect notice first, then recovers once.
 - Press `⌥⌘U`: show the pet and disable mouse passthrough so it can be clicked again.
 - Click Refresh now: the avatar becomes a spinner, then briefly shows a checkmark after fresh data arrives.
 
@@ -30,7 +32,7 @@ The detail card labels the service windows as **General usage limit** and **GPT-
 
 ## Language
 
-QuotaPet follows the macOS preferred language. Simplified Chinese variants use Chinese; English and all currently unsupported languages use English. Adding another language requires only a new localization resource and catalog validation, not quota or window-logic changes.
+QuotaPet defaults to the macOS preferred language. In Settings you can override that with **System**, **简体中文**, or **English**; the menu bar, detail card, refresh states, and Settings copy update immediately. Adding another language still requires only a new localization resource and catalog validation.
 
 ## Updating
 

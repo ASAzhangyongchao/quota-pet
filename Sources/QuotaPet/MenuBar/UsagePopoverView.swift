@@ -8,6 +8,8 @@ struct CodexConnectionOffer {
 enum RefreshFeedbackState: Equatable {
     case idle
     case refreshing
+    case timeoutNotice
+    case recovering
     case succeeded
     case failed
 }
@@ -17,36 +19,89 @@ final class UsageDetailsViewModel: ObservableObject {
     @Published private(set) var snapshot: QuotaSnapshot
     @Published private(set) var presentation: UsageDetailsPresentation
     @Published private(set) var refreshFeedback: RefreshFeedbackState = .idle
+    @Published private(set) var language: AppLanguage
     private(set) var updateCount = 0
     private let successFeedbackDurationNanoseconds: UInt64
-    let language: AppLanguage
+    private let refreshTimeoutNanoseconds: UInt64
+    private let recoverNoticeNanoseconds: UInt64
     private var feedbackResetTask: Task<Void, Never>?
+    private var refreshWatchdogTask: Task<Void, Never>?
+    private var autoRecoverUsed = false
+    private var pendingRecover: (() -> Void)?
 
-    init(snapshot: QuotaSnapshot, language: AppLanguage = .current, successFeedbackDurationNanoseconds: UInt64 = 1_000_000_000) {
+    init(
+        snapshot: QuotaSnapshot,
+        language: AppLanguage = .current,
+        successFeedbackDurationNanoseconds: UInt64 = 1_000_000_000,
+        refreshTimeoutNanoseconds: UInt64 = 20_000_000_000,
+        recoverNoticeNanoseconds: UInt64 = 2_500_000_000
+    ) {
         self.snapshot = snapshot
         self.language = language
         self.successFeedbackDurationNanoseconds = successFeedbackDurationNanoseconds
+        self.refreshTimeoutNanoseconds = refreshTimeoutNanoseconds
+        self.recoverNoticeNanoseconds = recoverNoticeNanoseconds
         presentation = UsageDetailsPresentation(snapshot: snapshot, language: language)
     }
 
-    func beginRefresh() {
+    func setLanguage(_ language: AppLanguage) {
+        guard self.language != language else { return }
+        self.language = language
+        presentation = UsageDetailsPresentation(snapshot: snapshot, language: language)
+        objectWillChange.send()
+    }
+
+    func beginRefresh(onRecover: (() -> Void)? = nil) {
         feedbackResetTask?.cancel()
+        refreshWatchdogTask?.cancel()
+        autoRecoverUsed = false
+        pendingRecover = onRecover
         refreshFeedback = .refreshing
+        scheduleRefreshWatchdog()
     }
 
     func update(_ snapshot: QuotaSnapshot) {
         self.snapshot = snapshot
         presentation = UsageDetailsPresentation(snapshot: snapshot, language: language)
         updateCount += 1
-        guard refreshFeedback == .refreshing else { return }
+        switch refreshFeedback {
+        case .refreshing, .timeoutNotice, .recovering:
+            break
+        case .idle, .succeeded, .failed:
+            return
+        }
         switch snapshot.state {
         case .loading:
             break
         case .ready:
+            refreshWatchdogTask?.cancel()
+            refreshWatchdogTask = nil
+            pendingRecover = nil
             refreshFeedback = .succeeded
             schedulePetRestoration()
         case .stale, .unavailable, .incompatible:
+            refreshWatchdogTask?.cancel()
+            refreshWatchdogTask = nil
+            pendingRecover = nil
             refreshFeedback = .failed
+        }
+    }
+
+    private func scheduleRefreshWatchdog() {
+        let timeout = refreshTimeoutNanoseconds
+        let notice = recoverNoticeNanoseconds
+        refreshWatchdogTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: timeout)
+            guard !Task.isCancelled, let self, self.refreshFeedback == .refreshing else { return }
+            self.refreshFeedback = .timeoutNotice
+            try? await Task.sleep(nanoseconds: notice)
+            guard !Task.isCancelled else { return }
+            guard self.refreshFeedback == .timeoutNotice, !self.autoRecoverUsed else { return }
+            self.autoRecoverUsed = true
+            self.refreshFeedback = .recovering
+            let recover = self.pendingRecover
+            self.pendingRecover = nil
+            recover?()
         }
     }
 
@@ -252,12 +307,16 @@ struct UsagePopoverView: View {
             }
 
             Button {
-                viewModel.beginRefresh()
+                viewModel.beginRefresh {
+                    onRefresh()
+                }
                 onRefresh()
             } label: {
                 HStack(spacing: 6) {
-                    if viewModel.refreshFeedback == .refreshing {
+                    if viewModel.refreshFeedback == .refreshing || viewModel.refreshFeedback == .recovering {
                         ProgressView().controlSize(.small)
+                    } else if viewModel.refreshFeedback == .timeoutNotice {
+                        Image(systemName: "exclamationmark.arrow.triangle.2.circlepath")
                     } else {
                         Image(systemName: viewModel.refreshFeedback == .succeeded ? "checkmark" : "arrow.clockwise")
                     }
@@ -267,7 +326,9 @@ struct UsagePopoverView: View {
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
-            .disabled(viewModel.refreshFeedback == .refreshing)
+            .disabled(viewModel.refreshFeedback == .refreshing
+                || viewModel.refreshFeedback == .timeoutNotice
+                || viewModel.refreshFeedback == .recovering)
         }
         .padding(16)
         .frame(width: 320, alignment: .leading)
@@ -278,6 +339,8 @@ struct UsagePopoverView: View {
         switch viewModel.refreshFeedback {
         case .idle, .failed: L10n.text(.refreshNow, language: viewModel.language)
         case .refreshing: L10n.text(.refreshing, language: viewModel.language)
+        case .timeoutNotice: L10n.text(.refreshTimeoutNotice, language: viewModel.language)
+        case .recovering: L10n.text(.refreshRecovering, language: viewModel.language)
         case .succeeded: L10n.text(.refreshSucceeded, language: viewModel.language)
         }
     }
@@ -340,9 +403,14 @@ private struct RefreshAvatar: View {
             switch feedback {
             case .idle:
                 VectorPetView(renderState: PetRenderState(snapshot: snapshot), size: 42)
-            case .refreshing:
+            case .refreshing, .recovering:
                 Circle().fill(Color.accentColor.opacity(0.14))
                 ProgressView().controlSize(.small)
+            case .timeoutNotice:
+                Circle().fill(Color.orange.opacity(0.16))
+                Image(systemName: "exclamationmark.arrow.triangle.2.circlepath")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(.orange)
             case .succeeded:
                 Circle().fill(Color.green.opacity(0.16))
                 Image(systemName: "checkmark.circle.fill")

@@ -219,8 +219,8 @@ final class ReleasePreparationContractTests: XCTestCase {
         XCTAssertTrue(documents["docs/USER_GUIDE.zh-CN.md"]?.contains("第一次打开") == true)
         XCTAssertTrue(documents["docs/USER_GUIDE.zh-CN.md"]?.contains("更新") == true)
         XCTAssertTrue(documents["docs/USER_GUIDE.zh-CN.md"]?.contains("卸载") == true)
-        XCTAssertTrue(documents["CHANGELOG.md"]?.contains("[0.1.3] - Unreleased") == true)
-        XCTAssertTrue(documents["CHANGELOG.zh-CN.md"]?.contains("[0.1.3] - 尚未发布") == true)
+        XCTAssertTrue(documents["CHANGELOG.md"]?.contains("[0.1.4] - Unreleased") == true)
+        XCTAssertTrue(documents["CHANGELOG.zh-CN.md"]?.contains("[0.1.4] - 尚未发布") == true)
 
         let releasePair = (documents["docs/RELEASING.md"] ?? "") + (documents["docs/RELEASING.zh-CN.md"] ?? "")
         for marker in ["Semantic Versioning", "GitHub", "Homebrew", "Rollback", "Developer ID", "notarytool", "SHA256", "attest"] {

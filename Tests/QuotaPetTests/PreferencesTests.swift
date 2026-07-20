@@ -4,6 +4,35 @@ import XCTest
 
 @MainActor
 final class PreferencesTests: XCTestCase {
+    func testLanguagePreferencePersistsAndResolves() {
+        let store = makeStore()
+        let preferences = Preferences(store: store)
+        XCTAssertEqual(preferences.languagePreference, .system)
+
+        preferences.languagePreference = .english
+        let restored = Preferences(store: store)
+        XCTAssertEqual(restored.languagePreference, .english)
+        XCTAssertEqual(restored.resolvedLanguage, .english)
+
+        preferences.languagePreference = .simplifiedChinese
+        XCTAssertEqual(Preferences(store: store).resolvedLanguage, .simplifiedChinese)
+        XCTAssertEqual(AppLanguage.resolve(preference: .system, preferredLanguage: "zh-Hans-CN"), .simplifiedChinese)
+        XCTAssertEqual(AppLanguage.resolve(preference: .system, preferredLanguage: "en-US"), .english)
+        XCTAssertEqual(AppLanguage.resolve(preference: .english, preferredLanguage: "zh-Hans-CN"), .english)
+    }
+
+    func testPetVisibleBoolReadsNSNumberZeroAsFalse() {
+        let store = makeStore()
+        store.set(NSNumber(value: 0), forKey: "QuotaPet.petVisible")
+        let preferences = Preferences(store: store)
+        XCTAssertFalse(preferences.petVisible)
+
+        preferences.petVisible = true
+        XCTAssertTrue(Preferences(store: store).petVisible)
+        preferences.petVisible = false
+        XCTAssertFalse(Preferences(store: store).petVisible)
+    }
+
     func testDefaultsAndWhitelistPersistenceAvoidUsageData() {
         let store = makeStore()
         let preferences = Preferences(store: store)
