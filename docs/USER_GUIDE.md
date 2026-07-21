@@ -29,12 +29,15 @@ The detail card labels the service windows as **General usage limit** and **GPT-
 - **Always on top** controls the floating window level.
 - **Mouse passthrough** lets clicks reach the app behind the pet; use `⌥⌘U` or Restore pet interaction to undo it.
 - Notifications are local and opt-in. Launch at login uses the macOS login-item API.
+- **About & Legal** shows the current version (`x.y.z (build)`). **Check for Updates** queries GitHub Releases only when you click it; it does not auto-download.
 
 ## Language
 
 QuotaPet defaults to the macOS preferred language. In Settings you can override that with **System**, **简体中文**, or **English**; the menu bar, detail card, refresh states, and Settings copy update immediately. Adding another language still requires only a new localization resource and catalog validation.
 
 ## Updating
+
+In Settings → About & Legal, use **Check for Updates** to compare your marketing version with the latest published GitHub Release (via the public Releases Atom feed). If a newer release exists, open the download page from the same section. Until a public release exists, the check reports that no public release is published yet.
 
 For a signed GitHub Release, quit QuotaPet, download the newer DMG or ZIP from the repository's Releases page, verify the published checksum, and replace the app in Applications. Preferences remain intact.
 

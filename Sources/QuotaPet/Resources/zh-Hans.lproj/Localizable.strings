@@ -82,6 +82,14 @@
 "settings.trusted" = "已信任";
 "settings.rejected" = "已拒绝：%@";
 "settings.about_legal" = "关于与法律说明";
+"settings.current_version" = "当前版本：%@";
+"settings.check_for_updates" = "检查更新";
+"settings.checking_for_updates" = "正在检查…";
+"settings.update.up_to_date" = "已是最新版本。";
+"settings.update.available" = "发现新版本：%@";
+"settings.update.no_release" = "尚未发布正式版本。";
+"settings.update.failed" = "检查更新失败，请稍后重试。";
+"settings.update.open_download" = "打开下载页";
 "settings.unofficial_notice" = "QuotaPet 是独立的非官方项目，与 OpenAI 无隶属关系，也未获其认可或赞助。";
 "settings.marks_notice" = "OpenAI、ChatGPT、GPT、Codex 及相关标识归各自权利人所有。";
 "about.title" = "关于 QuotaPet";

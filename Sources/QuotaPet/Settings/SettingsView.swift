@@ -166,6 +166,7 @@ private struct SettingsView: View {
                 }
 
                 Section(L10n.text(.settingsAboutLegal, language: language)) {
+                    UpdateCheckSettingsSection(language: language)
                     Text(L10n.text(.settingsUnofficialNotice, language: language))
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -185,17 +186,110 @@ private struct SettingsView: View {
 
     @ViewBuilder
     private func helpToggle(_ title: String, help: L10n.Key, isOn: Binding<Bool>) -> some View {
+        HelpToggleRow(
+            title: title,
+            helpText: L10n.text(help, language: language),
+            isOn: isOn
+        )
+    }
+}
+
+private struct HelpToggleRow: View {
+    let title: String
+    let helpText: String
+    @Binding var isOn: Bool
+    @State private var showingHelp = false
+
+    var body: some View {
         HStack(alignment: .center, spacing: 8) {
             Text(title)
-            Image(systemName: "questionmark.circle")
-                .foregroundStyle(.secondary)
-                .help(L10n.text(help, language: language))
-                .accessibilityLabel(L10n.text(help, language: language))
+            Button {
+                showingHelp.toggle()
+            } label: {
+                Image(systemName: "questionmark.circle")
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .popover(isPresented: $showingHelp, arrowEdge: .bottom) {
+                Text(helpText)
+                    .font(.callout)
+                    .padding(12)
+                    .frame(maxWidth: 280, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .accessibilityLabel(helpText)
             Spacer(minLength: 12)
-            Toggle("", isOn: isOn)
+            Toggle("", isOn: $isOn)
                 .labelsHidden()
                 .toggleStyle(.switch)
                 .accessibilityLabel(title)
+        }
+    }
+}
+
+private struct UpdateCheckSettingsSection: View {
+    let language: AppLanguage
+    private let versionInfo = AppVersionInfo.fromBundle()
+    @State private var isChecking = false
+    @State private var statusMessage: String?
+    @State private var downloadURL: URL?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(L10n.text(.settingsCurrentVersion, language: language, arguments: [versionInfo.displayLabel]))
+                .font(.body)
+                .textSelection(.enabled)
+
+            HStack(spacing: 12) {
+                Button(isChecking
+                    ? L10n.text(.settingsCheckingForUpdates, language: language)
+                    : L10n.text(.settingsCheckForUpdates, language: language)
+                ) {
+                    Task { await checkForUpdates() }
+                }
+                .disabled(isChecking)
+
+                if let downloadURL {
+                    Button(L10n.text(.settingsOpenDownloadPage, language: language)) {
+                        NSWorkspace.shared.open(downloadURL)
+                    }
+                }
+            }
+
+            if let statusMessage {
+                Text(statusMessage)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @MainActor
+    private func checkForUpdates() async {
+        isChecking = true
+        downloadURL = nil
+        statusMessage = L10n.text(.settingsCheckingForUpdates, language: language)
+        let outcome = await UpdateCheckService(currentMarketingVersion: versionInfo.marketing).check()
+        isChecking = false
+        switch outcome {
+        case .upToDate:
+            downloadURL = nil
+            statusMessage = L10n.text(.settingsUpdateUpToDate, language: language)
+        case let .updateAvailable(version, releaseURL):
+            downloadURL = releaseURL
+            statusMessage = L10n.text(
+                .settingsUpdateAvailable,
+                language: language,
+                arguments: [version.displayString]
+            )
+        case .noPublicRelease:
+            downloadURL = nil
+            statusMessage = L10n.text(.settingsUpdateNoRelease, language: language)
+        case .failed:
+            downloadURL = nil
+            statusMessage = L10n.text(.settingsUpdateFailed, language: language)
         }
     }
 }

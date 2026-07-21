@@ -77,8 +77,15 @@ final class ReleasePreparationContractTests: XCTestCase {
         XCTAssertTrue(settings.contains("settingsAboutLegal"))
         XCTAssertTrue(settings.contains("settingsUnofficialNotice"))
         XCTAssertTrue(settings.contains("settingsMarksNotice"))
+        XCTAssertTrue(settings.contains("UpdateCheckSettingsSection"))
+        // Legal copy stays local; network for update checks lives in UpdateCheckService, not SettingsView.
         XCTAssertFalse(settings.contains("URLSession"))
-        XCTAssertFalse(settings.contains("NSWorkspace.shared.open"))
+        XCTAssertFalse(settings.contains("api.github.com"))
+
+        let updateCheck = try XCTUnwrap(requiredContents(of: "Sources/QuotaPet/System/UpdateCheckService.swift"))
+        XCTAssertTrue(updateCheck.contains("releases.atom"))
+        XCTAssertTrue(updateCheck.contains("URLSession"))
+        XCTAssertFalse(updateCheck.contains("api.github.com/repos/ASAzhangyongchao/quota-pet/releases/latest"))
     }
 
     func testCIUsesNoReleaseSecretsOrRealCodexIntegration() throws {

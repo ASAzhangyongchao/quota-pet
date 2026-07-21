@@ -82,6 +82,14 @@
 "settings.trusted" = "Trusted";
 "settings.rejected" = "Rejected: %@";
 "settings.about_legal" = "About & Legal";
+"settings.current_version" = "Current version: %@";
+"settings.check_for_updates" = "Check for Updates";
+"settings.checking_for_updates" = "Checking…";
+"settings.update.up_to_date" = "You are up to date.";
+"settings.update.available" = "A newer version is available: %@";
+"settings.update.no_release" = "No public release is published yet.";
+"settings.update.failed" = "Could not check for updates. Try again later.";
+"settings.update.open_download" = "Open Download Page";
 "settings.unofficial_notice" = "QuotaPet is an unofficial independent project and is not affiliated with or endorsed by OpenAI.";
 "settings.marks_notice" = "OpenAI, ChatGPT, GPT, Codex, and related marks belong to their respective owners.";
 "about.title" = "About QuotaPet";

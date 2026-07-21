@@ -21,7 +21,7 @@ final class PackagingContractTests: XCTestCase {
         XCTAssertEqual(plist["CFBundleIconFile"] as? String, "AppIcon")
         XCTAssertEqual(plist["LSUIElement"] as? Bool, true)
         XCTAssertEqual(plist["CFBundleShortVersionString"] as? String, "0.1.4")
-        XCTAssertEqual(plist["CFBundleVersion"] as? String, "7")
+        XCTAssertEqual(plist["CFBundleVersion"] as? String, "10")
         XCTAssertEqual(plist["CFBundleDevelopmentRegion"] as? String, "en")
         XCTAssertEqual(plist["CFBundleLocalizations"] as? [String], ["en", "zh-Hans"])
         XCTAssertEqual(plist["LSMinimumSystemVersion"] as? String, "13.0")

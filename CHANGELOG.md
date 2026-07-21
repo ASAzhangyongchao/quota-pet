@@ -4,12 +4,13 @@
 
 All notable changes follow Semantic Versioning.
 
-## [0.1.4] - Unreleased
+## [0.1.4] - 2026-07-21
 
 ### Added
 
 - Manual refresh timeout notice before a single automatic reconnect.
-- Scrollable, wider Settings with grouped sections and hover help on toggles.
+- Scrollable, wider Settings with grouped sections; click `?` on toggles for a help popover.
+- Settings shows the current version and a manual Check for Updates action against the public Releases Atom feed.
 - Settings language override: System / 简体中文 / English with live UI updates.
 - Menu bar Help and About actions; popover positioning that stays below the menu bar.
 
@@ -17,7 +18,7 @@ All notable changes follow Semantic Versioning.
 
 - Manual refresh recovers a stopped provider instead of no-op spinning.
 - Trust paths in Settings wrap and remain selectable instead of truncating to ellipsis.
-- Updated the public metadata to version 0.1.4 build 7.
+- Updated the public metadata to version 0.1.4 build 10.
 
 ### Fixed
 

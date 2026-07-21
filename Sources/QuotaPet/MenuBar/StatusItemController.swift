@@ -101,7 +101,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
     @objc private func showAbout(_ sender: Any?) {
         let language = resolvedLanguage
-        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—"
+        let version = AppVersionInfo.fromBundle().displayLabel
         let alert = NSAlert()
         alert.messageText = L10n.text(.aboutTitle, language: language)
         alert.informativeText = [
