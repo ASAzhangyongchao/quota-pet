@@ -23,6 +23,7 @@ All notable changes follow Semantic Versioning.
 ### Fixed
 
 - Auto-trust official ChatGPT-bundled Codex even when the file is user-owned after app updates.
+- Keep `dist/` build artifacts out of Spotlight/Launchpad so only `/Applications/QuotaPet.app` appears.
 - Codex trust Settings preview shows a few prioritized rows; full list opens in a scrollable sheet.
 - User guide links point at `ASAzhangyongchao/quota-pet`.
 - Right-click menu language refreshes from the current Settings language before opening.

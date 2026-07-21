@@ -23,6 +23,7 @@
 ### 修复
 
 - ChatGPT 更新后用户属主的官方捆绑 Codex 也会自动信任，避免反复点确认。
+- `dist/` 构建产物不再被 Spotlight/启动台索引，避免出现两个 QuotaPet。
 - 设置中 Codex 信任预览只显示少量优先项；完整列表在可滚动弹窗中查看。
 - 使用说明链接改为 `ASAzhangyongchao/quota-pet`。
 - 右键菜单打开前按当前设置语言重建文案。

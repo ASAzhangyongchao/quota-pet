@@ -186,6 +186,8 @@ trap 'exit 143' TERM
 
 acquire_global_lock
 run_test_hook after_lock
+# Prevent Spotlight/Launchpad from treating build output as a second installed copy.
+: >"$DIST_DIR/.metadata_never_index"
 recover_orphaned_transactions
 STAGING_DIR="$(mktemp -d "$DIST_DIR/.staging-XXXXXX")"
 STAGED_APP="$STAGING_DIR/QuotaPet.app"

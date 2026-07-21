@@ -51,6 +51,7 @@ final class PackagingContractTests: XCTestCase {
         XCTAssertTrue(script.contains(".staging-"))
         XCTAssertTrue(script.contains("codesign --verify --deep --strict"))
         XCTAssertTrue(script.contains("ditto -c -k --sequesterRsrc --keepParent"))
+        XCTAssertTrue(script.contains(".metadata_never_index"))
         XCTAssertFalse(script.contains("/Users/"))
     }
 
