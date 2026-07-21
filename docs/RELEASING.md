@@ -79,4 +79,4 @@ Do not rewrite or delete a published tag. If a release is unsafe, mark it clearl
 
 ## Current 0.1.4 status
 
-Version 0.1.4 build 11 may be built and installed locally. Do not tag or publish it until the signing, notarization, protected-environment, legal-review, and clean-machine prerequisites above are actually available.
+Version 0.1.4 build 12 may be built and installed locally. Do not tag or publish it until the signing, notarization, protected-environment, legal-review, and clean-machine prerequisites above are actually available.

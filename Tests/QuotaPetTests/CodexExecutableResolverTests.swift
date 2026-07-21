@@ -251,7 +251,7 @@ final class CodexExecutableResolverTests: XCTestCase {
         XCTAssertTrue(resolver.inspect([input]).first?.requiresConfirmation == true)
     }
 
-    func testBundleAllowListRejectsNonRootOwnerAndWrongSystemPath() {
+    func testBundleAllowListAcceptsCurrentUserOwnerButRejectsWrongSystemPath() {
         let nonRootInput = ExecutablePathInput(
             url: URL(fileURLWithPath: "/Applications/ChatGPT.app/Contents/Resources/codex"),
             source: .chatGPTBundle
@@ -281,7 +281,7 @@ final class CodexExecutableResolverTests: XCTestCase {
             wrongPathInput.url.path: matchingWrongPath,
         ]))
 
-        XCTAssertTrue(resolver.inspect([nonRootInput]).first?.requiresConfirmation == true)
+        XCTAssertEqual(resolver.inspect([nonRootInput]).first?.trust, .bundleAllowList)
         XCTAssertTrue(resolver.inspect([wrongPathInput]).first?.requiresConfirmation == true)
     }
 

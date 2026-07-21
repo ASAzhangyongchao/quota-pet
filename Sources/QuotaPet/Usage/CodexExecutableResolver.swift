@@ -385,10 +385,20 @@ final class CodexExecutableResolver {
     }
 
     func confirm(_ candidate: ExecutableCandidate) -> Bool {
-        let fingerprint = TrustFingerprint(candidate: candidate)
-        guard eligibleFingerprints.contains(fingerprint) else { return false }
-        confirmedFingerprints.insert(fingerprint)
-        return true
+        let input = ExecutablePathInput(url: candidate.inputURL, source: candidate.source)
+        do {
+            let inspection = normalize(try inspector.inspect(url: input.url, source: input.source), input: input)
+            // Prefer the freshly inspected identity so ChatGPT updates still confirm.
+            let fingerprint = TrustFingerprint(candidate: inspection.candidate)
+            eligibleFingerprints.insert(fingerprint)
+            confirmedFingerprints.insert(fingerprint)
+            return true
+        } catch {
+            let fingerprint = TrustFingerprint(candidate: candidate)
+            guard eligibleFingerprints.contains(fingerprint) else { return false }
+            confirmedFingerprints.insert(fingerprint)
+            return true
+        }
     }
 
     func revalidate(_ candidate: ExecutableCandidate) -> Bool {
@@ -440,8 +450,10 @@ final class CodexExecutableResolver {
         default:
             expectedPath = nil
         }
+        // ChatGPT.app is usually user-owned (not root). Allow the current user as well as root.
+        let ownerOK = candidate.ownerUID == 0 || candidate.ownerUID == getuid()
         return expectedPath == candidate.canonicalURL.path &&
-            candidate.ownerUID == 0 &&
+            ownerOK &&
             inspection.signatureIsValid &&
             inspection.bundleIdentifier == Self.allowedSigningIdentifier &&
             inspection.candidate.signingIdentifier == Self.allowedSigningIdentifier &&
