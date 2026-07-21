@@ -52,11 +52,13 @@ Configure the protected GitHub environment named `release`, restrict it to versi
 - `SIGNING_IDENTITY`
 - `APPLE_API_KEY_BASE64`, `APPLE_API_KEY_ID`, `APPLE_API_ISSUER_ID`
 
-The workflow fails closed when a prerequisite is missing. It signs with hardened runtime and timestamping, uses `notarytool`, staples and validates the app and DMG, runs Gatekeeper, creates SHA256 checksums and an SPDX SBOM, emits GitHub attestations, and generates a version-pinned Homebrew cask.
+Also set the repository variable `ENABLE_NOTARIZED_RELEASE=1`. Until that variable is set, pushing a `v*.*.*` tag skips the notarized Release job so version-marker Releases (for in-app update checks) do not fail Actions. With the variable enabled, the workflow fails closed when a signing/notarization prerequisite is missing.
+
+When enabled, it signs with hardened runtime and timestamping, uses `notarytool`, staples and validates the app and DMG, runs Gatekeeper, creates SHA256 checksums and an SPDX SBOM, emits GitHub attestations, and generates a version-pinned Homebrew cask.
 
 ## Tag and publish
 
-Only after every prerequisite is confirmed:
+Only after every prerequisite is confirmed **and** `ENABLE_NOTARIZED_RELEASE=1` is set:
 
 ```bash
 git tag -s v0.1.3 -m "QuotaPet 0.1.3"
@@ -77,4 +79,4 @@ Do not rewrite or delete a published tag. If a release is unsafe, mark it clearl
 
 ## Current 0.1.4 status
 
-Version 0.1.4 build 10 may be built and installed locally. Do not tag or publish it until the signing, notarization, protected-environment, legal-review, and clean-machine prerequisites above are actually available.
+Version 0.1.4 build 11 may be built and installed locally. Do not tag or publish it until the signing, notarization, protected-environment, legal-review, and clean-machine prerequisites above are actually available.

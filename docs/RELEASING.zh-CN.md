@@ -52,11 +52,13 @@ QuotaPet 遵循语义化版本：
 - `SIGNING_IDENTITY`
 - `APPLE_API_KEY_BASE64`、`APPLE_API_KEY_ID`、`APPLE_API_ISSUER_ID`
 
-任何前提缺失时流程都会直接失败。流程使用加固运行时和时间戳签名，经 `notarytool` 公证，装订并校验 App 与 DMG，执行 Gatekeeper 检查，生成 SHA256、SPDX SBOM、GitHub 证明和固定版本 Homebrew Cask。
+同时设置仓库变量 `ENABLE_NOTARIZED_RELEASE=1`。在未设置该变量前，推送 `v*.*.*` 标签会跳过公证 Release job，避免仅为应用内「检查更新」创建的版本标记 Release 把 Actions 打红。启用变量后，签名/公证前提缺失时仍会直接失败。
+
+启用后，流程使用加固运行时和时间戳签名，经 `notarytool` 公证，装订并校验 App 与 DMG，执行 Gatekeeper 检查，生成 SHA256、SPDX SBOM、GitHub 证明和固定版本 Homebrew Cask。
 
 ## 创建标签与发布
 
-只有全部前提确认后才执行：
+只有全部前提确认、且已设置 `ENABLE_NOTARIZED_RELEASE=1` 后才执行：
 
 ```bash
 git tag -s v0.1.3 -m "QuotaPet 0.1.3"
@@ -77,4 +79,4 @@ git push origin v0.1.3
 
 ## 当前 0.1.4 状态
 
-0.1.4 build 10 可以本机构建和安装。在签名、公证、受保护环境、法律复核和干净机器验收条件真正具备之前，不创建标签，也不发布公开安装包。
+0.1.4 build 11 可以本机构建和安装。在签名、公证、受保护环境、法律复核和干净机器验收条件真正具备之前，不创建标签，也不发布公开安装包。

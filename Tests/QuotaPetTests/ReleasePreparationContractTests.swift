@@ -111,6 +111,7 @@ final class ReleasePreparationContractTests: XCTestCase {
             "tags:", "'v*.*.*'", "environment: release", "contents: write",
             "id-token: write", "attestations: write", "scripts/sign-and-notarize.sh",
             "scripts/update-cask.sh",
+            "ENABLE_NOTARIZED_RELEASE",
             "actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5",
             "anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610",
             "actions/attest@36051bcae73b7c2a8a6945a48cbf80953c6baa35",

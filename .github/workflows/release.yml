@@ -16,6 +16,9 @@ concurrency:
 
 jobs:
   release:
+    # Preparation-only default: version tags may exist for update checks without notarization.
+    # Set repository variable ENABLE_NOTARIZED_RELEASE=1 only after Developer ID + notary secrets are ready.
+    if: ${{ vars.ENABLE_NOTARIZED_RELEASE == '1' }}
     environment: release
     runs-on: macos-15
     timeout-minutes: 90
