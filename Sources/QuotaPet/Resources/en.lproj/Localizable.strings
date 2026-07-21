@@ -81,6 +81,9 @@
 "settings.confirm_trust" = "I reviewed the path and signature — enable";
 "settings.trusted" = "Trusted";
 "settings.rejected" = "Rejected: %@";
+"settings.trust.more" = "More (%d)";
+"settings.trust.all_title" = "All Codex trust candidates";
+"settings.trust.close" = "Close";
 "settings.about_legal" = "About & Legal";
 "settings.current_version" = "Current version: %@";
 "settings.check_for_updates" = "Check for Updates";

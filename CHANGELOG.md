@@ -18,10 +18,11 @@ All notable changes follow Semantic Versioning.
 
 - Manual refresh recovers a stopped provider instead of no-op spinning.
 - Trust paths in Settings wrap and remain selectable instead of truncating to ellipsis.
-- Updated the public metadata to version 0.1.4 build 10.
+- Updated the public metadata to version 0.1.4 build 11.
 
 ### Fixed
 
+- Codex trust Settings preview shows a few prioritized rows; full list opens in a scrollable sheet.
 - User guide links point at `ASAzhangyongchao/quota-pet`.
 - Right-click menu language refreshes from the current Settings language before opening.
 - Settings pickers no longer clip leading label characters.
