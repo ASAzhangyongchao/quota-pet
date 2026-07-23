@@ -117,6 +117,7 @@ final class FloatingPetController: NSObject, NSWindowDelegate {
     private var preferencesSubscriptions = Set<AnyCancellable>()
     private var screenObserver: NSObjectProtocol?
     private var idleWorkItem: DispatchWorkItem?
+    private var idleFaceWorkItems: [DispatchWorkItem] = []
     private var animationGate = PetAnimationGate()
     private var reduceMotionObserver: NSObjectProtocol?
     private var detailState = PetDetailInteractionState()
@@ -334,14 +335,20 @@ final class FloatingPetController: NSObject, NSWindowDelegate {
             connectionMode: preferences.connectionMode,
             mood: mood
         ), let duration = policy.durationMilliseconds else { return false }
-        if event == .idleBlink, mood.appliesIdleBlinkEyes {
-            petView.update(renderState: latestRenderState.blinking())
-        }
-        petView.play(event: event, durationMilliseconds: duration, mood: mood)
+
         animationResetWork?.cancel()
+        cancelIdleFaceFrames()
         let generation = animationGeneration.begin()
+
+        if event == .idleBlink {
+            scheduleIdleFaceFrames(mood: mood, generation: generation)
+        } else {
+            petView.play(event: event, durationMilliseconds: duration, mood: mood)
+        }
+
         let reset = DispatchWorkItem { [weak self] in
             guard let self, self.animationGeneration.accepts(generation) else { return }
+            self.cancelIdleFaceFrames()
             self.petView.update(renderState: self.latestRenderState)
             self.animationGate.complete()
         }
@@ -350,9 +357,30 @@ final class FloatingPetController: NSObject, NSWindowDelegate {
         return true
     }
 
+    private func scheduleIdleFaceFrames(mood: PetMood, generation: Int) {
+        for frame in mood.idleFaceSequence {
+            let work = DispatchWorkItem { [weak self] in
+                guard let self, self.animationGeneration.accepts(generation) else { return }
+                self.petView.update(renderState: self.latestRenderState.withIdleFace(frame.pose))
+            }
+            idleFaceWorkItems.append(work)
+            if frame.atMilliseconds == 0 {
+                work.perform()
+            } else {
+                DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(frame.atMilliseconds), execute: work)
+            }
+        }
+    }
+
+    private func cancelIdleFaceFrames() {
+        idleFaceWorkItems.forEach { $0.cancel() }
+        idleFaceWorkItems.removeAll()
+    }
+
     private func cancelAnimationAndIdle() {
         idleWorkItem?.cancel()
         idleWorkItem = nil
+        cancelIdleFaceFrames()
         pendingDetailWork?.cancel()
         animationResetWork?.cancel()
         animationGeneration.cancel()

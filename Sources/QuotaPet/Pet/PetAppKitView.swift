@@ -66,19 +66,18 @@ final class PetAppKitView: NSView {
     }
 
     func play(event: PetAnimationEvent, durationMilliseconds: Int, mood: PetMood = .content) {
+        // Idle is face-only (redraw keyframes). Never squash / lean the whole pet block.
+        if event == .idleBlink {
+            return
+        }
+
         layerReleaseWorkItem?.cancel()
         wantsLayer = true
         layerContentsRedrawPolicy = .onSetNeedsDisplay
         guard let layer else { return }
 
-        // Idle "blinkOnly" is eyes-only (handled by redraw); skip body motion to stay calm.
-        if event == .idleBlink, mood.idleMotion == .blinkOnly {
-            scheduleLayerRelease(afterMilliseconds: durationMilliseconds)
-            return
-        }
-
         let animation = CAKeyframeAnimation(keyPath: "transform")
-        animation.values = transformValues(for: event, mood: mood)
+        animation.values = transformValues(for: event)
         animation.keyTimes = [0, 0.5, 1]
         animation.duration = Double(durationMilliseconds) / 1_000
         animation.repeatCount = 0
@@ -101,54 +100,28 @@ final class PetAppKitView: NSView {
         DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(durationMilliseconds + 30), execute: release)
     }
 
-    private func transformValues(for event: PetAnimationEvent, mood: PetMood) -> [NSValue] {
+    private func transformValues(for event: PetAnimationEvent) -> [NSValue] {
         switch event {
         case .stateChange:
-            // Soft settle — just enough to notice a mood swap.
             return [
                 NSValue(caTransform3D: CATransform3DIdentity),
-                NSValue(caTransform3D: CATransform3DMakeScale(1.04, 1.04, 1)),
+                NSValue(caTransform3D: CATransform3DMakeScale(1.03, 1.03, 1)),
                 NSValue(caTransform3D: CATransform3DIdentity),
             ]
         case .click:
             return [
                 NSValue(caTransform3D: CATransform3DIdentity),
-                NSValue(caTransform3D: CATransform3DMakeScale(1.08, 1.08, 1)),
+                NSValue(caTransform3D: CATransform3DMakeScale(1.06, 1.06, 1)),
                 NSValue(caTransform3D: CATransform3DIdentity),
             ]
         case .hover:
             return [
                 NSValue(caTransform3D: CATransform3DIdentity),
-                NSValue(caTransform3D: CATransform3DMakeRotation(3 * .pi / 180, 0, 0, 1)),
+                NSValue(caTransform3D: CATransform3DMakeRotation(2 * .pi / 180, 0, 0, 1)),
                 NSValue(caTransform3D: CATransform3DIdentity),
             ]
         case .idleBlink:
-            switch mood.idleMotion {
-            case .softBreathBlink:
-                // Visible soft squash while blinking — still one-shot, not continuous.
-                return [
-                    NSValue(caTransform3D: CATransform3DIdentity),
-                    NSValue(caTransform3D: CATransform3DMakeScale(1.05, 0.96, 1)),
-                    NSValue(caTransform3D: CATransform3DIdentity),
-                ]
-            case .nervousWobbleBlink:
-                // Small lean — uneasy, not a shake.
-                var lean = CATransform3DIdentity
-                lean = CATransform3DTranslate(lean, -3.0, 0, 0)
-                return [
-                    NSValue(caTransform3D: CATransform3DIdentity),
-                    NSValue(caTransform3D: lean),
-                    NSValue(caTransform3D: CATransform3DIdentity),
-                ]
-            case .sleepBreath:
-                return [
-                    NSValue(caTransform3D: CATransform3DIdentity),
-                    NSValue(caTransform3D: CATransform3DMakeScale(1.03, 0.97, 1)),
-                    NSValue(caTransform3D: CATransform3DIdentity),
-                ]
-            case .blinkOnly:
-                return [NSValue(caTransform3D: CATransform3DIdentity)]
-            }
+            return [NSValue(caTransform3D: CATransform3DIdentity)]
         }
     }
 

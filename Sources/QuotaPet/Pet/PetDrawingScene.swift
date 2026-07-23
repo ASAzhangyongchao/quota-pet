@@ -128,6 +128,22 @@ extension PetDrawingPlan {
                 lineWidth: 1.8 * scale,
                 dash: []
             )
+        case .worried:
+            // Outer corners drop a little — reads as uneasy without moving the body.
+            return .stroke(
+                path: linePath([
+                    CGPoint(x: center.x - 11.5 * scale, y: center.y + 0.8 * scale), CGPoint(x: center.x - 6.5 * scale, y: center.y - 0.6 * scale),
+                    CGPoint(x: center.x + 6.5 * scale, y: center.y - 0.6 * scale), CGPoint(x: center.x + 11.5 * scale, y: center.y + 0.8 * scale),
+                ]),
+                color: color,
+                lineWidth: 1.8 * scale,
+                dash: []
+            )
+        case .squint:
+            // Flattened lids mid-blink.
+            path.addEllipse(in: CGRect(x: center.x - 11.2 * scale, y: center.y - 0.6 * scale, width: 4.2 * scale, height: 1.8 * scale))
+            path.addEllipse(in: CGRect(x: center.x + 7 * scale, y: center.y - 0.6 * scale, width: 4.2 * scale, height: 1.8 * scale))
+            return .fill(path: path, color: color)
         case .closed:
             path.move(to: CGPoint(x: center.x - 12 * scale, y: center.y - scale))
             path.addQuadCurve(to: CGPoint(x: center.x - 7 * scale, y: center.y - scale), control: CGPoint(x: center.x - 9.5 * scale, y: center.y + 2 * scale))
@@ -143,6 +159,9 @@ extension PetDrawingPlan {
         case .smile:
             path.move(to: CGPoint(x: center.x - 6 * scale, y: center.y + 7 * scale))
             path.addQuadCurve(to: CGPoint(x: center.x + 6 * scale, y: center.y + 7 * scale), control: CGPoint(x: center.x, y: center.y + 12 * scale))
+        case .softSmile:
+            path.move(to: CGPoint(x: center.x - 7.5 * scale, y: center.y + 6.5 * scale))
+            path.addQuadCurve(to: CGPoint(x: center.x + 7.5 * scale, y: center.y + 6.5 * scale), control: CGPoint(x: center.x, y: center.y + 13.5 * scale))
         case .flat:
             path.move(to: CGPoint(x: center.x - 5 * scale, y: center.y + 9 * scale))
             path.addLine(to: CGPoint(x: center.x + 5 * scale, y: center.y + 9 * scale))
@@ -152,6 +171,9 @@ extension PetDrawingPlan {
         case .sleep:
             path.move(to: CGPoint(x: center.x - 4 * scale, y: center.y + 8 * scale))
             path.addQuadCurve(to: CGPoint(x: center.x + 4 * scale, y: center.y + 8 * scale), control: CGPoint(x: center.x, y: center.y + 10 * scale))
+        case .sleepOpen:
+            path.move(to: CGPoint(x: center.x - 5 * scale, y: center.y + 7.5 * scale))
+            path.addQuadCurve(to: CGPoint(x: center.x + 5 * scale, y: center.y + 7.5 * scale), control: CGPoint(x: center.x, y: center.y + 12 * scale))
         }
         return path
     }
