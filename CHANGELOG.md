@@ -13,6 +13,10 @@ All notable changes follow Semantic Versioning.
 - Idle face beats about every 8–16 seconds; energy-saver still allows these cheap redraws.
 - Codex/ChatGPT updates that only change inode or code hash no longer fail trust revalidation; confirmed fingerprints roll forward, and QuotaPet rebuilds the provider after trust failures or repeated App Server exits.
 
+### Fixed
+
+- Settings update check no longer shows “Checking…” both on the button and as a caption underneath.
+
 ## [0.1.4] - 2026-07-21
 
 ### Added

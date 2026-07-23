@@ -373,7 +373,8 @@ private struct UpdateCheckSettingsSection: View {
     private func checkForUpdates() async {
         isChecking = true
         downloadURL = nil
-        statusMessage = L10n.text(.settingsCheckingForUpdates, language: language)
+        // Checking state lives on the button only — avoid duplicating "正在检查…" underneath.
+        statusMessage = nil
         let outcome = await UpdateCheckService(currentMarketingVersion: versionInfo.marketing).check()
         isChecking = false
         switch outcome {
