@@ -255,7 +255,7 @@ final class FloatingPetController: NSObject, NSWindowDelegate {
         panel.collectionBehavior = preferences.alwaysOnTop ? [.canJoinAllSpaces, .fullScreenAuxiliary] : []
         panel.ignoresMouseEvents = preferences.ignoresMouseEvents
         updateGlowStyle(snapshot: model.snapshot)
-        if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion || !preferences.petVisible || preferences.connectionMode == .energySaver {
+        if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion || !preferences.petVisible {
             cancelAnimationAndIdle()
         }
         if preferences.petVisible {

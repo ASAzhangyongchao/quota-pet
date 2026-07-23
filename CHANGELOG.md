@@ -9,7 +9,8 @@ All notable changes follow Semantic Versioning.
 ### Changed
 
 - Mood-aware idle pet motions: soft breath blink when healthy, tiny lean when low, sleep breath when depleted; removed whole-face opacity flash.
-- Idle motions fire about every 12–25 seconds so the pet feels more alive without a continuous animation timeline.
+- Idle motions fire about every 8–16 seconds so the pet feels more alive without a continuous animation timeline.
+- One-shot pet motions also run in energy-saver mode (energy-saver still only gates the Codex process lifecycle).
 - Codex/ChatGPT updates that only change inode or code hash no longer fail trust revalidation; confirmed fingerprints roll forward, and QuotaPet rebuilds the provider after trust failures or repeated App Server exits.
 
 ## [0.1.4] - 2026-07-21

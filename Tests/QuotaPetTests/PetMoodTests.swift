@@ -75,11 +75,11 @@ final class PetMoodTests: XCTestCase {
         let policy = PetAnimationPolicy(event: .idleBlink, reduceMotion: false, petVisible: true, connectionMode: .realtime)
 
         XCTAssertTrue(policy.animationEnabled)
-        XCTAssertEqual(policy.durationMilliseconds, 150)
-        XCTAssertEqual(policy.idleBlinkDelayRangeSeconds, 12...25)
-        XCTAssertEqual(policy.nextIdleBlinkDelay(randomUnit: 0), 12)
-        XCTAssertEqual(policy.nextIdleBlinkDelay(randomUnit: 0.5), 19)
-        XCTAssertEqual(policy.nextIdleBlinkDelay(randomUnit: 1), 25)
+        XCTAssertEqual(policy.durationMilliseconds, 180)
+        XCTAssertEqual(policy.idleBlinkDelayRangeSeconds, 8...16)
+        XCTAssertEqual(policy.nextIdleBlinkDelay(randomUnit: 0), 8)
+        XCTAssertEqual(policy.nextIdleBlinkDelay(randomUnit: 0.5), 12)
+        XCTAssertEqual(policy.nextIdleBlinkDelay(randomUnit: 1), 16)
     }
 
     func testSleepingIdleUsesLongerSoftBreath() {
@@ -90,7 +90,7 @@ final class PetMoodTests: XCTestCase {
             connectionMode: .realtime,
             mood: .sleeping
         )
-        XCTAssertEqual(policy.durationMilliseconds, 220)
+        XCTAssertEqual(policy.durationMilliseconds, 240)
         XCTAssertEqual(PetMood.sleeping.idleMotion, .sleepBreath)
         XCTAssertFalse(PetMood.sleeping.appliesIdleBlinkEyes)
     }
@@ -105,11 +105,23 @@ final class PetMoodTests: XCTestCase {
         XCTAssertTrue(PetMood.offline.appliesIdleBlinkEyes)
     }
 
-    func testAnimationIsDisabledForEveryGate() {
+    func testIdleMotionWorksInEnergySaverMode() {
+        let policy = PetAnimationPolicy(
+            event: .idleBlink,
+            reduceMotion: false,
+            petVisible: true,
+            connectionMode: .energySaver
+        )
+        XCTAssertTrue(policy.animationEnabled)
+        XCTAssertEqual(policy.durationMilliseconds, 180)
+        XCTAssertEqual(policy.idleBlinkDelayRangeSeconds, 8...16)
+    }
+
+    func testAnimationIsDisabledForReduceMotionAndHiddenPet() {
         let blockedPolicies = [
             PetAnimationPolicy(event: .idleBlink, reduceMotion: true, petVisible: true, connectionMode: .realtime),
             PetAnimationPolicy(event: .idleBlink, reduceMotion: false, petVisible: false, connectionMode: .realtime),
-            PetAnimationPolicy(event: .idleBlink, reduceMotion: false, petVisible: true, connectionMode: .energySaver),
+            PetAnimationPolicy(event: .idleBlink, reduceMotion: true, petVisible: true, connectionMode: .energySaver),
         ]
 
         for policy in blockedPolicies {

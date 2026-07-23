@@ -125,16 +125,16 @@ final class PetAppKitView: NSView {
         case .idleBlink:
             switch mood.idleMotion {
             case .softBreathBlink:
-                // Gentle squash — like a tiny inhale while blinking.
+                // Visible soft squash while blinking — still one-shot, not continuous.
                 return [
                     NSValue(caTransform3D: CATransform3DIdentity),
-                    NSValue(caTransform3D: CATransform3DMakeScale(1.02, 0.985, 1)),
+                    NSValue(caTransform3D: CATransform3DMakeScale(1.05, 0.96, 1)),
                     NSValue(caTransform3D: CATransform3DIdentity),
                 ]
             case .nervousWobbleBlink:
-                // Tiny lean — uneasy, not a shake.
+                // Small lean — uneasy, not a shake.
                 var lean = CATransform3DIdentity
-                lean = CATransform3DTranslate(lean, -1.6, 0, 0)
+                lean = CATransform3DTranslate(lean, -3.0, 0, 0)
                 return [
                     NSValue(caTransform3D: CATransform3DIdentity),
                     NSValue(caTransform3D: lean),
@@ -143,7 +143,7 @@ final class PetAppKitView: NSView {
             case .sleepBreath:
                 return [
                     NSValue(caTransform3D: CATransform3DIdentity),
-                    NSValue(caTransform3D: CATransform3DMakeScale(1.015, 0.98, 1)),
+                    NSValue(caTransform3D: CATransform3DMakeScale(1.03, 0.97, 1)),
                     NSValue(caTransform3D: CATransform3DIdentity),
                 ]
             case .blinkOnly:

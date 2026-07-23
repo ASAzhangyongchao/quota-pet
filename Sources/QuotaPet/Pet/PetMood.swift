@@ -230,7 +230,9 @@ public struct PetAnimationPolicy: Equatable {
     public let idleBlinkDelayRangeSeconds: ClosedRange<Int>?
 
     init(event: PetAnimationEvent, reduceMotion: Bool, petVisible: Bool, connectionMode: ConnectionMode, mood: PetMood = .content) {
-        guard !reduceMotion, petVisible, connectionMode != .energySaver else {
+        // Energy-saver only gates the Codex App Server process, not cheap one-shot pet motions.
+        _ = connectionMode
+        guard !reduceMotion, petVisible else {
             animationEnabled = false
             durationMilliseconds = nil
             idleBlinkDelayRangeSeconds = nil
@@ -250,8 +252,8 @@ public struct PetAnimationPolicy: Equatable {
             idleBlinkDelayRangeSeconds = nil
         case .idleBlink:
             // Sleeping breathe is slightly longer so it reads as calm, not a twitch.
-            durationMilliseconds = mood == .sleeping ? 220 : 150
-            idleBlinkDelayRangeSeconds = 12...25
+            durationMilliseconds = mood == .sleeping ? 240 : 180
+            idleBlinkDelayRangeSeconds = 8...16
         }
     }
 
