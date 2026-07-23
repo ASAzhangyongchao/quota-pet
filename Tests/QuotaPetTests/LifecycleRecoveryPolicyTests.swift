@@ -29,6 +29,43 @@ final class LifecycleRecoveryPolicyTests: XCTestCase {
         XCTAssertTrue(policy.didWake())
     }
 
+    func testProviderHealthRestartsOnTrustFailureAndThrottles() {
+        var policy = ProviderHealthRecoveryPolicy()
+        let language = AppLanguage.english
+        let trust = L10n.text(.errorTrustValidation, language: language)
+        let now = Date(timeIntervalSince1970: 1_000)
+
+        let incompatible = QuotaSnapshot(planType: nil, windows: [], updatedAt: now, state: .incompatible(trust))
+        XCTAssertTrue(policy.shouldRestartProvider(for: incompatible, language: language, now: now))
+        XCTAssertFalse(policy.shouldRestartProvider(for: incompatible, language: language, now: now.addingTimeInterval(10)))
+        XCTAssertTrue(policy.shouldRestartProvider(for: incompatible, language: language, now: now.addingTimeInterval(31)))
+    }
+
+    func testProviderHealthRestartsAfterRepeatedAppServerExits() {
+        var policy = ProviderHealthRecoveryPolicy()
+        let language = AppLanguage.english
+        let exited = L10n.text(.errorAppServerExited, language: language)
+        let now = Date(timeIntervalSince1970: 2_000)
+        let snapshot = QuotaSnapshot(planType: nil, windows: [], updatedAt: now, state: .unavailable(exited))
+
+        XCTAssertFalse(policy.shouldRestartProvider(for: snapshot, language: language, now: now))
+        XCTAssertTrue(policy.shouldRestartProvider(for: snapshot, language: language, now: now.addingTimeInterval(1)))
+    }
+
+    func testProviderHealthResetsExitCountOnReady() {
+        var policy = ProviderHealthRecoveryPolicy()
+        let language = AppLanguage.english
+        let exited = L10n.text(.errorAppServerExited, language: language)
+        let now = Date(timeIntervalSince1970: 3_000)
+        let bad = QuotaSnapshot(planType: nil, windows: [], updatedAt: now, state: .stale(exited))
+        let good = QuotaSnapshot(planType: nil, windows: [], updatedAt: now, state: .ready)
+
+        XCTAssertFalse(policy.shouldRestartProvider(for: bad, language: language, now: now))
+        policy.noteReady()
+        _ = policy.shouldRestartProvider(for: good, language: language, now: now)
+        XCTAssertFalse(policy.shouldRestartProvider(for: bad, language: language, now: now.addingTimeInterval(1)))
+    }
+
     @MainActor
     func testWakeWaitsForInterruptedSleepStopToComplete() async {
         let coordinator = LifecycleRecoveryCoordinator()

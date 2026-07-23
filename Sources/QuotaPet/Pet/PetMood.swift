@@ -251,7 +251,7 @@ public struct PetAnimationPolicy: Equatable {
         case .idleBlink:
             // Sleeping breathe is slightly longer so it reads as calm, not a twitch.
             durationMilliseconds = mood == .sleeping ? 220 : 150
-            idleBlinkDelayRangeSeconds = 35...70
+            idleBlinkDelayRangeSeconds = 12...25
         }
     }
 

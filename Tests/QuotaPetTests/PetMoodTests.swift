@@ -76,10 +76,10 @@ final class PetMoodTests: XCTestCase {
 
         XCTAssertTrue(policy.animationEnabled)
         XCTAssertEqual(policy.durationMilliseconds, 150)
-        XCTAssertEqual(policy.idleBlinkDelayRangeSeconds, 35...70)
-        XCTAssertEqual(policy.nextIdleBlinkDelay(randomUnit: 0), 35)
-        XCTAssertEqual(policy.nextIdleBlinkDelay(randomUnit: 0.5), 53)
-        XCTAssertEqual(policy.nextIdleBlinkDelay(randomUnit: 1), 70)
+        XCTAssertEqual(policy.idleBlinkDelayRangeSeconds, 12...25)
+        XCTAssertEqual(policy.nextIdleBlinkDelay(randomUnit: 0), 12)
+        XCTAssertEqual(policy.nextIdleBlinkDelay(randomUnit: 0.5), 19)
+        XCTAssertEqual(policy.nextIdleBlinkDelay(randomUnit: 1), 25)
     }
 
     func testSleepingIdleUsesLongerSoftBreath() {

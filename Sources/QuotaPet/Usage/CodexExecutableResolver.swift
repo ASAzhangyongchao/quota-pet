@@ -318,13 +318,16 @@ final class CodexExecutableResolver {
     private let inspector: any CodexExecutableInspecting
     private var eligibleFingerprints: Set<TrustFingerprint> = []
     private var confirmedFingerprints: Set<TrustFingerprint> = []
+    private let onConfirmedFingerprintsChanged: ((Set<TrustFingerprint>) -> Void)?
 
     init(
         inspector: any CodexExecutableInspecting = CodexStaticExecutableInspector(),
-        confirmedFingerprints: Set<TrustFingerprint> = []
+        confirmedFingerprints: Set<TrustFingerprint> = [],
+        onConfirmedFingerprintsChanged: ((Set<TrustFingerprint>) -> Void)? = nil
     ) {
         self.inspector = inspector
         self.confirmedFingerprints = confirmedFingerprints
+        self.onConfirmedFingerprintsChanged = onConfirmedFingerprintsChanged
     }
 
     static func candidateInputs(
@@ -405,9 +408,36 @@ final class CodexExecutableResolver {
         let input = ExecutablePathInput(url: candidate.inputURL, source: candidate.source)
         do {
             let inspection = normalize(try inspector.inspect(url: input.url, source: input.source), input: input)
-            guard inspection.candidate == candidate else { return false }
-            let fingerprint = TrustFingerprint(candidate: candidate)
-            return confirmedFingerprints.contains(fingerprint) || isAutomaticallyTrusted(inspection)
+            let fresh = inspection.candidate
+            let freshFingerprint = TrustFingerprint(candidate: fresh)
+
+            // Unchanged on-disk identity.
+            if fresh == candidate {
+                return confirmedFingerprints.contains(freshFingerprint) || isAutomaticallyTrusted(inspection)
+            }
+
+            // ChatGPT/Codex app updates keep the path but churn inode/hash.
+            guard fresh.canonicalURL.path == candidate.canonicalURL.path else { return false }
+
+            if isAutomaticallyTrusted(inspection) {
+                eligibleFingerprints.insert(freshFingerprint)
+                return true
+            }
+
+            // Previously confirmed at this path with the same signing identity — roll the fingerprint.
+            guard fresh.signingIdentifier == candidate.signingIdentifier,
+                  fresh.teamIdentifier == candidate.teamIdentifier,
+                  confirmedFingerprints.contains(where: {
+                      $0.canonicalPath == candidate.canonicalURL.path
+                          && $0.signingIdentifier == candidate.signingIdentifier
+                          && $0.teamIdentifier == candidate.teamIdentifier
+                  })
+            else { return false }
+
+            eligibleFingerprints.insert(freshFingerprint)
+            confirmedFingerprints.insert(freshFingerprint)
+            onConfirmedFingerprintsChanged?(confirmedFingerprints)
+            return true
         } catch {
             return false
         }

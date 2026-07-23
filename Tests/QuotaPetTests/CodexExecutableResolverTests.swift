@@ -100,7 +100,7 @@ final class CodexExecutableResolverTests: XCTestCase {
         XCTAssertTrue(resolver.revalidate(first))
     }
 
-    func testHashChangeInvalidatesConfirmation() {
+    func testHashChangeRollsConfirmedFingerprintAtSamePath() {
         let input = ExecutablePathInput(url: URL(fileURLWithPath: "/input/codex"), source: .path)
         let inspector = FakeInspector(["/input/codex": inspection(canonicalURL: URL(fileURLWithPath: "/safe/codex"), codeHash: "one")])
         let resolver = CodexExecutableResolver(inspector: inspector)
@@ -109,8 +109,8 @@ final class CodexExecutableResolverTests: XCTestCase {
         XCTAssertTrue(resolver.revalidate(first))
         inspector.set(inspection(canonicalURL: URL(fileURLWithPath: "/safe/codex"), codeHash: "two"), for: input.url.path)
 
-        XCTAssertTrue(resolver.inspect([input]).first?.requiresConfirmation == true)
-        XCTAssertFalse(resolver.revalidate(first))
+        XCTAssertTrue(resolver.revalidate(first))
+        XCTAssertEqual(resolver.inspect([input]).first?.trust, .confirmed)
     }
 
     func testRepeatedLargeExecutableHashIsStable() throws {
@@ -285,10 +285,12 @@ final class CodexExecutableResolverTests: XCTestCase {
         XCTAssertTrue(resolver.inspect([wrongPathInput]).first?.requiresConfirmation == true)
     }
 
-    func testRevalidateRejectsChangedDeviceOrInode() {
+    func testRevalidateRollsConfirmedFingerprintWhenInodeChangesAtSamePath() {
         let input = ExecutablePathInput(url: URL(fileURLWithPath: "/safe/codex"), source: .userSelected)
         let inspector = FakeInspector([input.url.path: inspection(
             canonicalURL: input.url,
+            signingIdentifier: "com.example.codex",
+            teamIdentifier: "TEAM123",
             deviceID: 1,
             inode: 1
         )])
@@ -296,7 +298,72 @@ final class CodexExecutableResolverTests: XCTestCase {
         let first = try! XCTUnwrap(resolver.inspect([input]).first?.candidate)
         XCTAssertTrue(resolver.confirm(first))
         XCTAssertTrue(resolver.revalidate(first))
-        inspector.set(inspection(canonicalURL: input.url, deviceID: 1, inode: 2), for: input.url.path)
+        inspector.set(inspection(
+            canonicalURL: input.url,
+            signingIdentifier: "com.example.codex",
+            teamIdentifier: "TEAM123",
+            deviceID: 1,
+            inode: 2
+        ), for: input.url.path)
+
+        XCTAssertTrue(resolver.revalidate(first))
+        XCTAssertEqual(resolver.inspect([input]).first?.trust, .confirmed)
+    }
+
+    func testRevalidateAcceptsOfficialBundleAfterInodeHashChurn() {
+        let input = ExecutablePathInput(
+            url: URL(fileURLWithPath: "/Applications/ChatGPT.app/Contents/Resources/codex"),
+            source: .chatGPTBundle
+        )
+        let inspector = FakeInspector([input.url.path: inspection(
+            canonicalURL: input.url,
+            codeHash: "old-hash",
+            signingIdentifier: "com.openai.codex",
+            teamIdentifier: "2DC432GLL2",
+            signatureIsValid: true,
+            bundleIdentifier: "com.openai.codex",
+            ownerUID: getuid(),
+            deviceID: 1,
+            inode: 1
+        )])
+        let resolver = CodexExecutableResolver(inspector: inspector)
+        let first = try! XCTUnwrap(resolver.inspect([input]).first?.candidate)
+        XCTAssertEqual(resolver.inspect([input]).first?.trust, .bundleAllowList)
+
+        inspector.set(inspection(
+            canonicalURL: input.url,
+            codeHash: "new-hash",
+            signingIdentifier: "com.openai.codex",
+            teamIdentifier: "2DC432GLL2",
+            signatureIsValid: true,
+            bundleIdentifier: "com.openai.codex",
+            ownerUID: getuid(),
+            deviceID: 1,
+            inode: 99
+        ), for: input.url.path)
+
+        XCTAssertTrue(resolver.revalidate(first))
+    }
+
+    func testRevalidateStillRejectsSigningIdentityChangeAtSamePath() {
+        let input = ExecutablePathInput(url: URL(fileURLWithPath: "/safe/codex"), source: .userSelected)
+        let inspector = FakeInspector([input.url.path: inspection(
+            canonicalURL: input.url,
+            signingIdentifier: "first",
+            teamIdentifier: "TEAM",
+            deviceID: 1,
+            inode: 1
+        )])
+        let resolver = CodexExecutableResolver(inspector: inspector)
+        let first = try! XCTUnwrap(resolver.inspect([input]).first?.candidate)
+        XCTAssertTrue(resolver.confirm(first))
+        inspector.set(inspection(
+            canonicalURL: input.url,
+            signingIdentifier: "second",
+            teamIdentifier: "TEAM",
+            deviceID: 1,
+            inode: 1
+        ), for: input.url.path)
 
         XCTAssertFalse(resolver.revalidate(first))
     }

@@ -25,6 +25,69 @@ struct LifecycleRecoveryPolicy {
     }
 }
 
+/// Decides when Codex trust / process death should rebuild AppComposition (e.g. after ChatGPT updates).
+struct ProviderHealthRecoveryPolicy: Equatable {
+    static let minimumRestartInterval: TimeInterval = 30
+    static let appServerExitThreshold = 2
+
+    private(set) var consecutiveAppServerExits = 0
+    private var lastRestartAt: Date?
+
+    mutating func noteReady() {
+        consecutiveAppServerExits = 0
+    }
+
+    /// Returns true when the host should call `restartProvider` (throttled).
+    mutating func shouldRestartProvider(
+        for snapshot: QuotaSnapshot,
+        language: AppLanguage,
+        now: Date = .now
+    ) -> Bool {
+        if case .ready = snapshot.state {
+            noteReady()
+            return false
+        }
+
+        let trustMessage = L10n.text(.errorTrustValidation, language: language)
+        let exitedMessage = L10n.text(.errorAppServerExited, language: language)
+        let message: String?
+        switch snapshot.state {
+        case let .incompatible(value), let .unavailable(value), let .stale(value):
+            message = value
+        case .loading, .ready:
+            message = nil
+        }
+
+        let isTrustFailure = snapshot.state.isIncompatible || message == trustMessage
+        let isAppServerExit = message == exitedMessage
+
+        if isAppServerExit {
+            consecutiveAppServerExits += 1
+        } else if isTrustFailure {
+            consecutiveAppServerExits = 0
+        }
+
+        let shouldAttempt =
+            isTrustFailure
+            || (isAppServerExit && consecutiveAppServerExits >= Self.appServerExitThreshold)
+
+        guard shouldAttempt else { return false }
+        if let lastRestartAt, now.timeIntervalSince(lastRestartAt) < Self.minimumRestartInterval {
+            return false
+        }
+        lastRestartAt = now
+        consecutiveAppServerExits = 0
+        return true
+    }
+}
+
+private extension ConnectionState {
+    var isIncompatible: Bool {
+        if case .incompatible = self { return true }
+        return false
+    }
+}
+
 @MainActor
 final class LifecycleRecoveryCoordinator {
     private var transitionTask: Task<Void, Never>?
@@ -60,6 +123,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusController: StatusItemController?
     private var terminationCoordinator: TerminationCoordinator?
     private var preferences: Preferences?
+    private var executableResolver: CodexExecutableResolver?
     private var floatingPetController: FloatingPetController?
     private var settingsController: DeferredConstruction<SettingsWindowController>?
     private var globalHotKey: GlobalHotKey?
@@ -67,11 +131,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var localNotifications: LocalNotificationController?
     private var notificationPolicy = NotificationPolicy()
     private var notificationSubscription: AnyCancellable?
+    private var healthSubscription: AnyCancellable?
     private var preferenceSubscriptions = Set<AnyCancellable>()
     private let lifecycleCoordinator = LifecycleRecoveryCoordinator()
     private var recoveryQueued = false
     private var recoveryGeneration: UInt64 = 0
     private var recoveryPolicy = LifecycleRecoveryPolicy()
+    private var providerHealthPolicy = ProviderHealthRecoveryPolicy()
     private var isTerminating = false
     private var workspaceObservers: [NSObjectProtocol] = []
     private var networkMonitor: NWPathMonitor?
@@ -79,7 +145,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let preferences = Preferences()
-        let resolver = CodexExecutableResolver(confirmedFingerprints: preferences.confirmedFingerprints)
+        let resolver = CodexExecutableResolver(confirmedFingerprints: preferences.confirmedFingerprints) { [weak preferences] fingerprints in
+            preferences?.confirmedFingerprints = fingerprints
+        }
+        self.executableResolver = resolver
         let composition = AppComposition(resolver: resolver)
         self.composition = composition
         self.preferences = preferences
@@ -150,6 +219,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         floatingPetController = nil
         settingsController = nil
         statusController = nil
+        healthSubscription?.cancel()
+        healthSubscription = nil
+        executableResolver = nil
     }
 
     private func showSettings() {
@@ -217,12 +289,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func subscribeToSnapshots(_ model: AppModel) {
         notificationSubscription?.cancel()
+        healthSubscription?.cancel()
         notificationSubscription = model.$snapshot.dropFirst().sink { [weak self] snapshot in
             guard let self, self.preferences?.notificationsEnabled == true,
                   let notification = self.notificationPolicy.evaluate(snapshot)
             else { return }
             self.localNotifications?.deliver(notification)
         }
+        healthSubscription = model.$snapshot.dropFirst().sink { [weak self] snapshot in
+            self?.evaluateProviderHealth(snapshot)
+        }
+    }
+
+    private func evaluateProviderHealth(_ snapshot: QuotaSnapshot) {
+        guard !isTerminating, let resolver = executableResolver, let preferences else { return }
+        let language = preferences.resolvedLanguage
+        guard providerHealthPolicy.shouldRestartProvider(for: snapshot, language: language) else { return }
+        restartProvider(resolver: resolver)
     }
 
     private func makeTerminationCoordinator() -> TerminationCoordinator {
