@@ -77,9 +77,9 @@ final class PetInteractionVisualState: ObservableObject {
 
     func activate(_ event: PetAnimationEvent) {
         switch event {
-        case .stateChange: scale = 1.06
-        case .click: scale = 1.12
-        case .hover: rotation = .degrees(4)
+        case .stateChange: scale = 1.04
+        case .click: scale = 1.08
+        case .hover: rotation = .degrees(3)
         case .idleBlink: isBlinking = true
         }
     }
@@ -312,7 +312,13 @@ final class FloatingPetController: NSObject, NSWindowDelegate {
 
     private func scheduleIdleBlink() {
         idleWorkItem?.cancel()
-        let policy = PetAnimationPolicy(event: .idleBlink, reduceMotion: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion, petVisible: preferences.petVisible, connectionMode: preferences.connectionMode)
+        let policy = PetAnimationPolicy(
+            event: .idleBlink,
+            reduceMotion: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion,
+            petVisible: preferences.petVisible,
+            connectionMode: preferences.connectionMode,
+            mood: latestRenderState.mood
+        )
         guard policy.animationEnabled, let seconds = policy.nextIdleBlinkDelay(randomUnit: Double.random(in: 0...1)) else { return }
         let work = DispatchWorkItem { [weak self] in self?.play(.idleBlink); self?.scheduleIdleBlink() }
         idleWorkItem = work
@@ -320,9 +326,18 @@ final class FloatingPetController: NSObject, NSWindowDelegate {
     }
 
     @discardableResult private func play(_ event: PetAnimationEvent) -> Bool {
-        guard let policy = animationGate.consume(event, reduceMotion: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion, petVisible: preferences.petVisible, connectionMode: preferences.connectionMode), let duration = policy.durationMilliseconds else { return false }
-        if event == .idleBlink { petView.update(renderState: latestRenderState.blinking()) }
-        petView.play(event: event, durationMilliseconds: duration)
+        let mood = latestRenderState.mood
+        guard let policy = animationGate.consume(
+            event,
+            reduceMotion: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion,
+            petVisible: preferences.petVisible,
+            connectionMode: preferences.connectionMode,
+            mood: mood
+        ), let duration = policy.durationMilliseconds else { return false }
+        if event == .idleBlink, mood.appliesIdleBlinkEyes {
+            petView.update(renderState: latestRenderState.blinking())
+        }
+        petView.play(event: event, durationMilliseconds: duration, mood: mood)
         animationResetWork?.cancel()
         let generation = animationGeneration.begin()
         let reset = DispatchWorkItem { [weak self] in

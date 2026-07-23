@@ -44,12 +44,33 @@ final class PetAppKitViewTests: XCTestCase {
 
         view.play(event: .click, durationMilliseconds: 200)
 
-        let animation = view.layer?.animation(forKey: PetAppKitView.interactionAnimationKey)
+        let animation = view.layer?.animation(forKey: PetAppKitView.interactionAnimationKey) as? CAKeyframeAnimation
         XCTAssertNotNil(animation)
+        XCTAssertEqual(animation?.keyPath, "transform")
         XCTAssertEqual(animation?.duration ?? 0, 0.2, accuracy: 0.001)
         XCTAssertEqual(animation?.repeatCount, 0)
         XCTAssertFalse(animation?.autoreverses ?? true)
         XCTAssertFalse(view.mouseDownCanMoveWindow)
+    }
+
+    func testIdleBlinkUsesMoodAwareTransformNotOpacityFlash() {
+        let thriving = PetAppKitView(
+            renderState: PetRenderState(snapshot: appKitSnapshot(remaining: 90)),
+            onClick: {},
+            onHover: {}
+        )
+        thriving.play(event: .idleBlink, durationMilliseconds: 150, mood: .thriving)
+        let thrivingAnimation = thriving.layer?.animation(forKey: PetAppKitView.interactionAnimationKey) as? CAKeyframeAnimation
+        XCTAssertEqual(thrivingAnimation?.keyPath, "transform")
+        XCTAssertEqual(thrivingAnimation?.values?.count, 3)
+
+        let offline = PetAppKitView(
+            renderState: PetRenderState(snapshot: appKitSnapshot(remaining: 90)),
+            onClick: {},
+            onHover: {}
+        )
+        offline.play(event: .idleBlink, durationMilliseconds: 150, mood: .offline)
+        XCTAssertNil(offline.layer?.animation(forKey: PetAppKitView.interactionAnimationKey))
     }
 
     func testIdleViewDoesNotKeepACompositionLayerAfterOneShotAnimation() {

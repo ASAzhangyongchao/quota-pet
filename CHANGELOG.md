@@ -4,6 +4,12 @@
 
 All notable changes follow Semantic Versioning.
 
+## [Unreleased]
+
+### Changed
+
+- Mood-aware idle pet motions: soft breath blink when healthy, tiny lean when low, sleep breath when depleted; removed whole-face opacity flash.
+
 ## [0.1.4] - 2026-07-21
 
 ### Added

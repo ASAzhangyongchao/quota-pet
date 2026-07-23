@@ -65,41 +65,32 @@ final class PetAppKitView: NSView {
         NSAccessibility.post(element: self, notification: .valueChanged)
     }
 
-    func play(event: PetAnimationEvent, durationMilliseconds: Int) {
+    func play(event: PetAnimationEvent, durationMilliseconds: Int, mood: PetMood = .content) {
         layerReleaseWorkItem?.cancel()
         wantsLayer = true
         layerContentsRedrawPolicy = .onSetNeedsDisplay
         guard let layer else { return }
-        let animation = CAKeyframeAnimation(keyPath: event == .idleBlink ? "opacity" : "transform")
-        switch event {
-        case .stateChange:
-            animation.values = [
-                CATransform3DIdentity,
-                CATransform3DMakeScale(1.06, 1.06, 1),
-                CATransform3DIdentity,
-            ]
-        case .click:
-            animation.values = [
-                CATransform3DIdentity,
-                CATransform3DMakeScale(1.12, 1.12, 1),
-                CATransform3DIdentity,
-            ]
-        case .hover:
-            animation.values = [
-                CATransform3DIdentity,
-                CATransform3DMakeRotation(4 * .pi / 180, 0, 0, 1),
-                CATransform3DIdentity,
-            ]
-        case .idleBlink:
-            animation.values = [1, 0.86, 1]
+
+        // Idle "blinkOnly" is eyes-only (handled by redraw); skip body motion to stay calm.
+        if event == .idleBlink, mood.idleMotion == .blinkOnly {
+            scheduleLayerRelease(afterMilliseconds: durationMilliseconds)
+            return
         }
+
+        let animation = CAKeyframeAnimation(keyPath: "transform")
+        animation.values = transformValues(for: event, mood: mood)
         animation.keyTimes = [0, 0.5, 1]
         animation.duration = Double(durationMilliseconds) / 1_000
         animation.repeatCount = 0
         animation.autoreverses = false
         animation.isRemovedOnCompletion = true
+        animation.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
         layer.removeAnimation(forKey: Self.interactionAnimationKey)
         layer.add(animation, forKey: Self.interactionAnimationKey)
+        scheduleLayerRelease(afterMilliseconds: durationMilliseconds)
+    }
+
+    private func scheduleLayerRelease(afterMilliseconds durationMilliseconds: Int) {
         let release = DispatchWorkItem { [weak self] in
             guard let self else { return }
             self.layer?.removeAnimation(forKey: Self.interactionAnimationKey)
@@ -108,6 +99,57 @@ final class PetAppKitView: NSView {
         }
         layerReleaseWorkItem = release
         DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(durationMilliseconds + 30), execute: release)
+    }
+
+    private func transformValues(for event: PetAnimationEvent, mood: PetMood) -> [NSValue] {
+        switch event {
+        case .stateChange:
+            // Soft settle — just enough to notice a mood swap.
+            return [
+                NSValue(caTransform3D: CATransform3DIdentity),
+                NSValue(caTransform3D: CATransform3DMakeScale(1.04, 1.04, 1)),
+                NSValue(caTransform3D: CATransform3DIdentity),
+            ]
+        case .click:
+            return [
+                NSValue(caTransform3D: CATransform3DIdentity),
+                NSValue(caTransform3D: CATransform3DMakeScale(1.08, 1.08, 1)),
+                NSValue(caTransform3D: CATransform3DIdentity),
+            ]
+        case .hover:
+            return [
+                NSValue(caTransform3D: CATransform3DIdentity),
+                NSValue(caTransform3D: CATransform3DMakeRotation(3 * .pi / 180, 0, 0, 1)),
+                NSValue(caTransform3D: CATransform3DIdentity),
+            ]
+        case .idleBlink:
+            switch mood.idleMotion {
+            case .softBreathBlink:
+                // Gentle squash — like a tiny inhale while blinking.
+                return [
+                    NSValue(caTransform3D: CATransform3DIdentity),
+                    NSValue(caTransform3D: CATransform3DMakeScale(1.02, 0.985, 1)),
+                    NSValue(caTransform3D: CATransform3DIdentity),
+                ]
+            case .nervousWobbleBlink:
+                // Tiny lean — uneasy, not a shake.
+                var lean = CATransform3DIdentity
+                lean = CATransform3DTranslate(lean, -1.6, 0, 0)
+                return [
+                    NSValue(caTransform3D: CATransform3DIdentity),
+                    NSValue(caTransform3D: lean),
+                    NSValue(caTransform3D: CATransform3DIdentity),
+                ]
+            case .sleepBreath:
+                return [
+                    NSValue(caTransform3D: CATransform3DIdentity),
+                    NSValue(caTransform3D: CATransform3DMakeScale(1.015, 0.98, 1)),
+                    NSValue(caTransform3D: CATransform3DIdentity),
+                ]
+            case .blinkOnly:
+                return [NSValue(caTransform3D: CATransform3DIdentity)]
+            }
+        }
     }
 
     func cancelAnimation() {

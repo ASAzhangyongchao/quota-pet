@@ -193,12 +193,43 @@ public enum PetAnimationEvent: Equatable {
     case idleBlink
 }
 
+/// Mood-aware idle motion. Still one-shot and short; never a continuous timeline.
+public enum PetIdleMotion: Equatable {
+    /// Soft squash + eye blink — calm / happy.
+    case softBreathBlink
+    /// Tiny horizontal wobble + eye blink — uneasy.
+    case nervousWobbleBlink
+    /// Soft vertical breathe only — already sleepy eyes.
+    case sleepBreath
+    /// Eye blink only, no body motion — offline.
+    case blinkOnly
+}
+
+public extension PetMood {
+    var idleMotion: PetIdleMotion {
+        switch self {
+        case .thriving, .content: .softBreathBlink
+        case .concerned, .critical: .nervousWobbleBlink
+        case .sleeping: .sleepBreath
+        case .offline: .blinkOnly
+        }
+    }
+
+    /// Whether idle should temporarily redraw closed eyes.
+    var appliesIdleBlinkEyes: Bool {
+        switch self {
+        case .thriving, .content, .concerned, .critical, .offline: true
+        case .sleeping: false
+        }
+    }
+}
+
 public struct PetAnimationPolicy: Equatable {
     public let animationEnabled: Bool
     public let durationMilliseconds: Int?
     public let idleBlinkDelayRangeSeconds: ClosedRange<Int>?
 
-    init(event: PetAnimationEvent, reduceMotion: Bool, petVisible: Bool, connectionMode: ConnectionMode) {
+    init(event: PetAnimationEvent, reduceMotion: Bool, petVisible: Bool, connectionMode: ConnectionMode, mood: PetMood = .content) {
         guard !reduceMotion, petVisible, connectionMode != .energySaver else {
             animationEnabled = false
             durationMilliseconds = nil
@@ -218,8 +249,9 @@ public struct PetAnimationPolicy: Equatable {
             durationMilliseconds = 180
             idleBlinkDelayRangeSeconds = nil
         case .idleBlink:
-            durationMilliseconds = 140
-            idleBlinkDelayRangeSeconds = 45...90
+            // Sleeping breathe is slightly longer so it reads as calm, not a twitch.
+            durationMilliseconds = mood == .sleeping ? 220 : 150
+            idleBlinkDelayRangeSeconds = 35...70
         }
     }
 
@@ -234,9 +266,21 @@ public struct PetAnimationPolicy: Equatable {
 struct PetAnimationGate {
     private(set) var isActive = false
 
-    mutating func consume(_ event: PetAnimationEvent, reduceMotion: Bool, petVisible: Bool, connectionMode: ConnectionMode) -> PetAnimationPolicy? {
+    mutating func consume(
+        _ event: PetAnimationEvent,
+        reduceMotion: Bool,
+        petVisible: Bool,
+        connectionMode: ConnectionMode,
+        mood: PetMood = .content
+    ) -> PetAnimationPolicy? {
         guard !isActive else { return nil }
-        let policy = PetAnimationPolicy(event: event, reduceMotion: reduceMotion, petVisible: petVisible, connectionMode: connectionMode)
+        let policy = PetAnimationPolicy(
+            event: event,
+            reduceMotion: reduceMotion,
+            petVisible: petVisible,
+            connectionMode: connectionMode,
+            mood: mood
+        )
         guard policy.animationEnabled else { return nil }
         isActive = true
         return policy

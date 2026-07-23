@@ -75,11 +75,34 @@ final class PetMoodTests: XCTestCase {
         let policy = PetAnimationPolicy(event: .idleBlink, reduceMotion: false, petVisible: true, connectionMode: .realtime)
 
         XCTAssertTrue(policy.animationEnabled)
-        XCTAssertEqual(policy.durationMilliseconds, 140)
-        XCTAssertEqual(policy.idleBlinkDelayRangeSeconds, 45...90)
-        XCTAssertEqual(policy.nextIdleBlinkDelay(randomUnit: 0), 45)
-        XCTAssertEqual(policy.nextIdleBlinkDelay(randomUnit: 0.5), 68)
-        XCTAssertEqual(policy.nextIdleBlinkDelay(randomUnit: 1), 90)
+        XCTAssertEqual(policy.durationMilliseconds, 150)
+        XCTAssertEqual(policy.idleBlinkDelayRangeSeconds, 35...70)
+        XCTAssertEqual(policy.nextIdleBlinkDelay(randomUnit: 0), 35)
+        XCTAssertEqual(policy.nextIdleBlinkDelay(randomUnit: 0.5), 53)
+        XCTAssertEqual(policy.nextIdleBlinkDelay(randomUnit: 1), 70)
+    }
+
+    func testSleepingIdleUsesLongerSoftBreath() {
+        let policy = PetAnimationPolicy(
+            event: .idleBlink,
+            reduceMotion: false,
+            petVisible: true,
+            connectionMode: .realtime,
+            mood: .sleeping
+        )
+        XCTAssertEqual(policy.durationMilliseconds, 220)
+        XCTAssertEqual(PetMood.sleeping.idleMotion, .sleepBreath)
+        XCTAssertFalse(PetMood.sleeping.appliesIdleBlinkEyes)
+    }
+
+    func testMoodIdleMotionsStaySubtleAndMapped() {
+        XCTAssertEqual(PetMood.thriving.idleMotion, .softBreathBlink)
+        XCTAssertEqual(PetMood.content.idleMotion, .softBreathBlink)
+        XCTAssertEqual(PetMood.concerned.idleMotion, .nervousWobbleBlink)
+        XCTAssertEqual(PetMood.critical.idleMotion, .nervousWobbleBlink)
+        XCTAssertEqual(PetMood.offline.idleMotion, .blinkOnly)
+        XCTAssertTrue(PetMood.thriving.appliesIdleBlinkEyes)
+        XCTAssertTrue(PetMood.offline.appliesIdleBlinkEyes)
     }
 
     func testAnimationIsDisabledForEveryGate() {
