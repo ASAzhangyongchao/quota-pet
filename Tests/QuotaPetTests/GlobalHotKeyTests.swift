@@ -5,6 +5,37 @@ final class GlobalHotKeyTests: XCTestCase {
     func testDefaultEncodingUsesOptionCommandU() {
         XCTAssertEqual(HotKeyShortcut.optionCommandU.keyCode, 32)
         XCTAssertEqual(HotKeyShortcut.optionCommandU.carbonModifiers, HotKeyShortcut.commandModifier | HotKeyShortcut.optionModifier)
+        XCTAssertEqual(HotKeyShortcut.optionCommandU.displayString, "⌥⌘U")
+    }
+
+    func testFromKeyEventRequiresPrimaryModifier() {
+        let bare = NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: [],
+            timestamp: 0,
+            windowNumber: 0,
+            context: nil,
+            characters: "u",
+            charactersIgnoringModifiers: "u",
+            isARepeat: false,
+            keyCode: 32
+        )!
+        XCTAssertNil(HotKeyShortcut.fromKeyEvent(bare))
+
+        let combo = NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: [.option, .command],
+            timestamp: 0,
+            windowNumber: 0,
+            context: nil,
+            characters: "u",
+            charactersIgnoringModifiers: "u",
+            isARepeat: false,
+            keyCode: 32
+        )!
+        XCTAssertEqual(HotKeyShortcut.fromKeyEvent(combo), .optionCommandU)
     }
 
     func testInstallFailureDoesNotAttemptRegistration() {

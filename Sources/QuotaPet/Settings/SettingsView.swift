@@ -108,29 +108,34 @@ private struct SettingsView: View {
 
                 Section(L10n.text(.settingsSectionConnection, language: language)) {
                     VStack(alignment: .leading, spacing: 6) {
-                        Text(L10n.text(.settingsConnectionMode, language: language))
-                            .font(.body)
+                        HelpLabelRow(
+                            title: L10n.text(.settingsConnectionMode, language: language),
+                            helpText: L10n.text(.settingsModeHelp, language: language)
+                        )
                         Picker("", selection: $preferences.connectionMode) {
                             Text(L10n.text(.settingsRealtime, language: language)).tag(ConnectionMode.realtime)
                             Text(L10n.text(.settingsEnergySaver, language: language)).tag(ConnectionMode.energySaver)
                         }
                         .labelsHidden()
                         .pickerStyle(.segmented)
-                        Text(L10n.text(.settingsModeHelp, language: language))
+                        Text(L10n.text(.settingsModePickHint, language: language))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
-                    HStack {
-                        Text(L10n.text(.settingsShortcut, language: language))
-                        if let message = preferences.hotKeyStatusMessage {
-                            Text(message).foregroundStyle(.red)
+                    HotKeySettingsRow(
+                        language: language,
+                        hotKey: preferences.hotKey,
+                        statusMessage: preferences.hotKeyStatusMessage,
+                        onChange: { shortcut in
+                            preferences.hotKey = shortcut
+                            onRegisterHotKey()
+                        },
+                        onReset: {
+                            preferences.hotKey = .optionCommandU
+                            onRegisterHotKey()
                         }
-                    }
-                    Button(L10n.text(.settingsResetShortcut, language: language)) {
-                        preferences.hotKey = .optionCommandU
-                        onRegisterHotKey()
-                    }
+                    )
                 }
 
                 Section(L10n.text(.settingsSectionNotifications, language: language)) {
@@ -207,10 +212,26 @@ private struct HelpToggleRow: View {
     let title: String
     let helpText: String
     @Binding var isOn: Bool
-    @State private var showingHelp = false
 
     var body: some View {
         HStack(alignment: .center, spacing: 8) {
+            HelpLabelRow(title: title, helpText: helpText)
+            Spacer(minLength: 12)
+            Toggle("", isOn: $isOn)
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .accessibilityLabel(title)
+        }
+    }
+}
+
+private struct HelpLabelRow: View {
+    let title: String
+    let helpText: String
+    @State private var showingHelp = false
+
+    var body: some View {
+        HStack(spacing: 8) {
             Text(title)
             Button {
                 showingHelp.toggle()
@@ -227,12 +248,88 @@ private struct HelpToggleRow: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             .accessibilityLabel(helpText)
-            Spacer(minLength: 12)
-            Toggle("", isOn: $isOn)
-                .labelsHidden()
-                .toggleStyle(.switch)
-                .accessibilityLabel(title)
         }
+    }
+}
+
+private struct HotKeySettingsRow: View {
+    let language: AppLanguage
+    let hotKey: HotKeyShortcut
+    let statusMessage: String?
+    let onChange: (HotKeyShortcut) -> Void
+    let onReset: () -> Void
+
+    @State private var isRecording = false
+    @State private var captureHint: String?
+    @State private var monitor: Any?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HelpLabelRow(
+                title: L10n.text(.settingsShortcut, language: language),
+                helpText: L10n.text(.settingsShortcutHelp, language: language)
+            )
+            HStack(spacing: 8) {
+                Text(isRecording
+                     ? L10n.text(.settingsShortcutRecording, language: language)
+                     : hotKey.displayString)
+                    .font(.body.monospaced())
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 6))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6)
+                            .strokeBorder(isRecording ? Color.accentColor : Color.secondary.opacity(0.35), lineWidth: 1)
+                    )
+                Button(L10n.text(.settingsShortcutChange, language: language)) {
+                    beginRecording()
+                }
+                .disabled(isRecording)
+                Button(L10n.text(.settingsResetShortcut, language: language)) {
+                    stopRecording()
+                    onReset()
+                }
+                .disabled(isRecording || hotKey == .optionCommandU)
+            }
+            if let captureHint {
+                Text(captureHint)
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
+            if let statusMessage {
+                Text(statusMessage)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
+        }
+        .onDisappear { stopRecording() }
+    }
+
+    private func beginRecording() {
+        stopRecording()
+        isRecording = true
+        captureHint = nil
+        monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            if event.keyCode == 53 { // Escape
+                stopRecording()
+                return nil
+            }
+            if let shortcut = HotKeyShortcut.fromKeyEvent(event) {
+                stopRecording()
+                onChange(shortcut)
+                return nil
+            }
+            captureHint = L10n.text(.settingsShortcutInvalid, language: language)
+            return nil
+        }
+    }
+
+    private func stopRecording() {
+        if let monitor {
+            NSEvent.removeMonitor(monitor)
+            self.monitor = nil
+        }
+        isRecording = false
     }
 }
 
