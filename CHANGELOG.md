@@ -16,6 +16,7 @@ All notable changes follow Semantic Versioning.
 ### Fixed
 
 - Settings update check no longer shows “Checking…” both on the button and as a caption underneath.
+- Manual refresh no longer stays stuck on “Reconnecting…” forever when Codex never returns a fresh snapshot; it fails after a second timeout so the button can be pressed again.
 
 ## [0.1.4] - 2026-07-21
 

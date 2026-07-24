@@ -24,8 +24,10 @@ final class UsageDetailsViewModel: ObservableObject {
     private let successFeedbackDurationNanoseconds: UInt64
     private let refreshTimeoutNanoseconds: UInt64
     private let recoverNoticeNanoseconds: UInt64
+    private let recoveringTimeoutNanoseconds: UInt64
     private var feedbackResetTask: Task<Void, Never>?
     private var refreshWatchdogTask: Task<Void, Never>?
+    private var recoveringWatchdogTask: Task<Void, Never>?
     private var autoRecoverUsed = false
     private var pendingRecover: (() -> Void)?
 
@@ -34,13 +36,15 @@ final class UsageDetailsViewModel: ObservableObject {
         language: AppLanguage = .current,
         successFeedbackDurationNanoseconds: UInt64 = 1_000_000_000,
         refreshTimeoutNanoseconds: UInt64 = 20_000_000_000,
-        recoverNoticeNanoseconds: UInt64 = 2_500_000_000
+        recoverNoticeNanoseconds: UInt64 = 2_500_000_000,
+        recoveringTimeoutNanoseconds: UInt64 = 25_000_000_000
     ) {
         self.snapshot = snapshot
         self.language = language
         self.successFeedbackDurationNanoseconds = successFeedbackDurationNanoseconds
         self.refreshTimeoutNanoseconds = refreshTimeoutNanoseconds
         self.recoverNoticeNanoseconds = recoverNoticeNanoseconds
+        self.recoveringTimeoutNanoseconds = recoveringTimeoutNanoseconds
         presentation = UsageDetailsPresentation(snapshot: snapshot, language: language)
     }
 
@@ -54,6 +58,7 @@ final class UsageDetailsViewModel: ObservableObject {
     func beginRefresh(onRecover: (() -> Void)? = nil) {
         feedbackResetTask?.cancel()
         refreshWatchdogTask?.cancel()
+        recoveringWatchdogTask?.cancel()
         autoRecoverUsed = false
         pendingRecover = onRecover
         refreshFeedback = .refreshing
@@ -74,14 +79,12 @@ final class UsageDetailsViewModel: ObservableObject {
         case .loading:
             break
         case .ready:
-            refreshWatchdogTask?.cancel()
-            refreshWatchdogTask = nil
+            clearRefreshWatchdogs()
             pendingRecover = nil
             refreshFeedback = .succeeded
             schedulePetRestoration()
         case .stale, .unavailable, .incompatible:
-            refreshWatchdogTask?.cancel()
-            refreshWatchdogTask = nil
+            clearRefreshWatchdogs()
             pendingRecover = nil
             refreshFeedback = .failed
         }
@@ -102,7 +105,27 @@ final class UsageDetailsViewModel: ObservableObject {
             let recover = self.pendingRecover
             self.pendingRecover = nil
             recover?()
+            self.scheduleRecoveringWatchdog()
         }
+    }
+
+    /// Second timeout so “正在重新连接…” cannot spin forever when Codex never yields a new snapshot.
+    private func scheduleRecoveringWatchdog() {
+        recoveringWatchdogTask?.cancel()
+        let timeout = recoveringTimeoutNanoseconds
+        recoveringWatchdogTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: timeout)
+            guard !Task.isCancelled, let self, self.refreshFeedback == .recovering else { return }
+            self.clearRefreshWatchdogs()
+            self.refreshFeedback = .failed
+        }
+    }
+
+    private func clearRefreshWatchdogs() {
+        refreshWatchdogTask?.cancel()
+        refreshWatchdogTask = nil
+        recoveringWatchdogTask?.cancel()
+        recoveringWatchdogTask = nil
     }
 
     private func schedulePetRestoration() {

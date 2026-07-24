@@ -79,7 +79,8 @@ final class InteractionViewModelTests: XCTestCase {
         let details = UsageDetailsViewModel(
             snapshot: makeSnapshot(used: 10),
             refreshTimeoutNanoseconds: 50_000_000,
-            recoverNoticeNanoseconds: 50_000_000
+            recoverNoticeNanoseconds: 50_000_000,
+            recoveringTimeoutNanoseconds: 500_000_000
         )
         let noticeSeen = expectation(description: "timeout notice")
         let recoveringSeen = expectation(description: "recovering")
@@ -110,6 +111,27 @@ final class InteractionViewModelTests: XCTestCase {
 
         try await Task.sleep(nanoseconds: 150_000_000)
         XCTAssertEqual(recoverCount, 1)
+    }
+
+    func testRecoveringTimesOutToFailedWhenNoSnapshotArrives() async throws {
+        let details = UsageDetailsViewModel(
+            snapshot: makeSnapshot(used: 10),
+            refreshTimeoutNanoseconds: 30_000_000,
+            recoverNoticeNanoseconds: 20_000_000,
+            recoveringTimeoutNanoseconds: 40_000_000
+        )
+        let failedSeen = expectation(description: "recovering failed")
+        var subscriptions = Set<AnyCancellable>()
+        details.$refreshFeedback
+            .dropFirst()
+            .sink { feedback in
+                if feedback == .failed { failedSeen.fulfill() }
+            }
+            .store(in: &subscriptions)
+
+        details.beginRefresh {}
+        await fulfillment(of: [failedSeen], timeout: 2)
+        XCTAssertEqual(details.refreshFeedback, .failed)
     }
 
     func testRefreshTimeoutDoesNotRecoverAfterSuccessfulSnapshot() async throws {
