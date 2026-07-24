@@ -94,6 +94,7 @@ private struct SettingsView: View {
     let onPickTerminalCodex: () -> Void
     let onRegisterHotKey: () -> Void
     let onSetLaunchAtLogin: (Bool) -> Void
+    @State private var showingHotKeySettings = false
 
     private var language: AppLanguage { preferences.resolvedLanguage }
 
@@ -123,19 +124,28 @@ private struct SettingsView: View {
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
-                    HotKeySettingsRow(
-                        language: language,
-                        hotKey: preferences.hotKey,
-                        statusMessage: preferences.hotKeyStatusMessage,
-                        onChange: { shortcut in
-                            preferences.hotKey = shortcut
-                            onRegisterHotKey()
-                        },
-                        onReset: {
-                            preferences.hotKey = .optionCommandU
-                            onRegisterHotKey()
+                }
+
+                Section {
+                    Button {
+                        showingHotKeySettings = true
+                    } label: {
+                        HStack {
+                            HelpLabelRow(
+                                title: L10n.text(.settingsHotkeys, language: language),
+                                helpText: L10n.text(.settingsHotkeysHelp, language: language)
+                            )
+                            Spacer(minLength: 12)
+                            Text(preferences.shortcut(for: .restorePet).displayString)
+                                .font(.body.monospaced())
+                                .foregroundStyle(.secondary)
+                            Image(systemName: "chevron.right")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.tertiary)
                         }
-                    )
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
                 }
 
                 Section(L10n.text(.settingsSectionNotifications, language: language)) {
@@ -196,6 +206,12 @@ private struct SettingsView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .frame(minWidth: 520, idealWidth: 560, maxWidth: .infinity, minHeight: 360, maxHeight: .infinity)
+        .sheet(isPresented: $showingHotKeySettings) {
+            HotKeyBindingsSheet(
+                preferences: preferences,
+                onRegisterHotKey: onRegisterHotKey
+            )
+        }
     }
 
     @ViewBuilder
@@ -252,9 +268,67 @@ private struct HelpLabelRow: View {
     }
 }
 
-private struct HotKeySettingsRow: View {
+private struct HotKeyBindingsSheet: View {
+    @ObservedObject var preferences: Preferences
+    let onRegisterHotKey: () -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    private var language: AppLanguage { preferences.resolvedLanguage }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text(L10n.text(.settingsHotkeysTitle, language: language))
+                    .font(.headline)
+                Spacer()
+                Button(L10n.text(.settingsTrustClose, language: language)) {
+                    dismiss()
+                }
+                .keyboardShortcut(.cancelAction)
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 16)
+            .padding(.bottom, 8)
+
+            Text(L10n.text(.settingsHotkeysSubtitle, language: language))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 20)
+                .padding(.bottom, 12)
+
+            Divider()
+
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 16) {
+                    ForEach(AppHotKey.allCases) { action in
+                        HotKeyBindingEditorRow(
+                            language: language,
+                            action: action,
+                            shortcut: preferences.shortcut(for: action),
+                            statusMessage: preferences.hotKeyStatusByAction[action],
+                            onChange: { shortcut in
+                                preferences.setShortcut(shortcut, for: action)
+                                onRegisterHotKey()
+                            },
+                            onReset: {
+                                preferences.resetShortcut(for: action)
+                                onRegisterHotKey()
+                            }
+                        )
+                    }
+                }
+                .padding(20)
+            }
+        }
+        .frame(minWidth: 480, idealWidth: 520, minHeight: 320, idealHeight: 380)
+    }
+}
+
+private struct HotKeyBindingEditorRow: View {
     let language: AppLanguage
-    let hotKey: HotKeyShortcut
+    let action: AppHotKey
+    let shortcut: HotKeyShortcut
     let statusMessage: String?
     let onChange: (HotKeyShortcut) -> Void
     let onReset: () -> Void
@@ -265,14 +339,17 @@ private struct HotKeySettingsRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HelpLabelRow(
-                title: L10n.text(.settingsShortcut, language: language),
-                helpText: L10n.text(.settingsShortcutHelp, language: language)
-            )
+            Text(action.title(language: language))
+                .font(.body.weight(.semibold))
+            Text(action.detail(language: language))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
             HStack(spacing: 8) {
                 Text(isRecording
                      ? L10n.text(.settingsShortcutRecording, language: language)
-                     : hotKey.displayString)
+                     : shortcut.displayString)
                     .font(.body.monospaced())
                     .padding(.horizontal, 10)
                     .padding(.vertical, 6)
@@ -289,8 +366,9 @@ private struct HotKeySettingsRow: View {
                     stopRecording()
                     onReset()
                 }
-                .disabled(isRecording || hotKey == .optionCommandU)
+                .disabled(isRecording || shortcut == action.defaultShortcut)
             }
+
             if let captureHint {
                 Text(captureHint)
                     .font(.caption)
@@ -302,6 +380,9 @@ private struct HotKeySettingsRow: View {
                     .foregroundStyle(.red)
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .background(Color(nsColor: .controlBackgroundColor).opacity(0.55), in: RoundedRectangle(cornerRadius: 10))
         .onDisappear { stopRecording() }
     }
 

@@ -385,7 +385,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func registerHotKey() {
         guard let preferences else { return }
-        preferences.setHotKeyRegistration(globalHotKey?.register(preferences.hotKey) ?? .failure(.registrationFailed))
+        preferences.setHotKeyRegistration(
+            globalHotKey?.register(preferences.shortcut(for: .restorePet)) ?? .failure(.registrationFailed),
+            for: .restorePet
+        )
     }
 
     private func applyConnectionMode(_ mode: ConnectionMode) {

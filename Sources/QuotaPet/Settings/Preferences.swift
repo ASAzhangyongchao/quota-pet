@@ -69,7 +69,7 @@ final class Preferences: ObservableObject {
     @Published var ignoresMouseEvents: Bool { didSet { store.set(ignoresMouseEvents, forKey: Key.ignoresMouseEvents) } }
     @Published var connectionMode: ConnectionMode { didSet { store.set(connectionMode.rawValue, forKey: Key.connectionMode) } }
     @Published var hotKey: HotKeyShortcut { didSet { persist(hotKey, key: Key.hotKey) } }
-    @Published private(set) var hotKeyStatusMessage: String?
+    @Published private(set) var hotKeyStatusByAction: [AppHotKey: String] = [:]
     @Published var notificationsEnabled: Bool { didSet { store.set(notificationsEnabled, forKey: Key.notificationsEnabled) } }
     @Published private(set) var launchAtLoginEnabled: Bool
     @Published private(set) var launchAtLoginErrorMessage: String?
@@ -100,8 +100,8 @@ final class Preferences: ObservableObject {
         alwaysOnTop = Self.boolValue(from: store, key: Key.alwaysOnTop, default: true)
         ignoresMouseEvents = Self.boolValue(from: store, key: Key.ignoresMouseEvents, default: false)
         connectionMode = ConnectionMode(rawValue: store.object(forKey: Key.connectionMode) as? String ?? "") ?? .energySaver
-        hotKey = Self.load(HotKeyShortcut.self, from: store, key: Key.hotKey) ?? .optionCommandU
-        hotKeyStatusMessage = nil
+        hotKey = Self.load(HotKeyShortcut.self, from: store, key: Key.hotKey) ?? AppHotKey.restorePet.defaultShortcut
+        hotKeyStatusByAction = [:]
         notificationsEnabled = store.object(forKey: Key.notificationsEnabled) as? Bool ?? false
         launchAtLoginEnabled = store.object(forKey: Key.launchAtLoginEnabled) as? Bool ?? false
         launchAtLoginErrorMessage = nil
@@ -114,12 +114,38 @@ final class Preferences: ObservableObject {
         userSelectedCodexPath = store.object(forKey: Key.userSelectedCodexPath) as? String
     }
 
-    func setHotKeyRegistration(_ result: Result<Void, GlobalHotKeyError>) {
-        switch result {
-        case .success: hotKeyStatusMessage = nil
-        case .failure(.occupied): hotKeyStatusMessage = L10n.text(.hotkeyOccupied, language: resolvedLanguage)
-        case .failure: hotKeyStatusMessage = L10n.text(.hotkeyRegistrationFailed, language: resolvedLanguage)
+    func shortcut(for action: AppHotKey) -> HotKeyShortcut {
+        switch action {
+        case .restorePet: hotKey
         }
+    }
+
+    func setShortcut(_ shortcut: HotKeyShortcut, for action: AppHotKey) {
+        switch action {
+        case .restorePet: hotKey = shortcut
+        }
+    }
+
+    func resetShortcut(for action: AppHotKey) {
+        setShortcut(action.defaultShortcut, for: action)
+    }
+
+    func setHotKeyRegistration(_ result: Result<Void, GlobalHotKeyError>, for action: AppHotKey = .restorePet) {
+        var next = hotKeyStatusByAction
+        switch result {
+        case .success:
+            next.removeValue(forKey: action)
+        case .failure(.occupied):
+            next[action] = L10n.text(.hotkeyOccupied, language: resolvedLanguage)
+        case .failure:
+            next[action] = L10n.text(.hotkeyRegistrationFailed, language: resolvedLanguage)
+        }
+        hotKeyStatusByAction = next
+    }
+
+    /// Compatibility for older call sites / tests.
+    var hotKeyStatusMessage: String? {
+        hotKeyStatusByAction[.restorePet]
     }
 
     func setLaunchAtLoginState(enabled: Bool, errorMessage: String?) {
