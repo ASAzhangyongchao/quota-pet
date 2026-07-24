@@ -397,7 +397,7 @@ private actor UsageCoordinator {
                 connecting = false
                 handshaking = true
                 _ = try await client.request(method: "initialize", params: [
-                    "clientInfo": ["name": "quota_pet", "title": "QuotaPet", "version": "0.1.4"],
+                    "clientInfo": ["name": "quota_pet", "title": "QuotaPet", "version": "0.1.5"],
                 ])
                 guard connection?.generation == currentGeneration else { return }
                 try await client.sendInitialized(params: [:])

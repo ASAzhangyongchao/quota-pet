@@ -6,19 +6,28 @@ All notable changes follow Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.1.5] - 2026-07-24
+
+### Added
+
+- Dedicated **Keyboard shortcuts** settings row that opens a sheet listing every assignable global hotkey with title, explanation, and per-row change/reset.
+- Codex rescan now shows an explicit scan-result message when only ChatGPT’s bundled binary exists (or when a terminal install is found / nothing is found).
+- Clearer settings `?` help for appearance, notifications, launch at login, and connection mode (when to pick energy saving vs real-time).
+
 ### Changed
 
-- Idle animation is **face-only**: multi-frame blink / mouth accents by mood. The whole pet block no longer squashes or leans.
-- Resting faces are a bit more human: worried eyes when low, smile widen on happy blink, sleep mouth “inhale” when depleted.
-- Idle face beats about every 8–16 seconds; energy-saver still allows these cheap redraws.
-- Codex/ChatGPT updates that only change inode or code hash no longer fail trust revalidation; confirmed fingerprints roll forward, and QuotaPet rebuilds the provider after trust failures or repeated App Server exits.
+- Settings “Codex sources” is two fixed cards (ChatGPT app vs terminal) with Use / Rescan / Choose file.
+- Idle animation is **face-only**; energy-saver still allows short idle face beats.
+- Codex/ChatGPT updates that only change inode or code hash no longer fail trust revalidation; provider rebuilds after trust failures or repeated App Server exits.
+- Public metadata updated to version 0.1.5 build 13.
+- GitHub Release ships an **ad-hoc** (non-notarized) DMG/ZIP for interim distribution until Developer ID is available.
 
 ### Fixed
 
-- Settings update check no longer shows “Checking…” both on the button and as a caption underneath.
-- Manual refresh no longer stays stuck on “Reconnecting…” forever when Codex never returns a fresh snapshot; it fails after a second timeout so the button can be pressed again.
-- When ChatGPT’s bundled Codex fails mid-update, QuotaPet now fails over across other trusted Codex binaries and temporarily demotes the broken path so reconnects don’t keep hammering the updating app.
-- Settings “Codex sources” is now two fixed cards (ChatGPT app vs terminal) with clear “in use” status plus Use / Rescan / Choose file actions.
+- Settings update check no longer duplicates “Checking…” under the button.
+- Manual refresh no longer stays stuck on “Reconnecting…” forever after a second timeout.
+- When ChatGPT’s bundled Codex fails mid-update, QuotaPet fails over across other trusted binaries and temporarily demotes the broken path.
+- Terminal Codex discovery merges login-shell PATH so GUI launches are less blind to Homebrew/nvm installs.
 
 ## [0.1.4] - 2026-07-21
 

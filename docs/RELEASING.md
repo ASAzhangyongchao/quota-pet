@@ -77,6 +77,6 @@ The generated cask pins the versioned GitHub Release URL and literal DMG SHA256;
 
 Do not rewrite or delete a published tag. If a release is unsafe, mark it clearly in GitHub, remove it from the Homebrew tap, and publish a higher patch version containing the correction. Users can temporarily reinstall a previously verified versioned artifact. Preserve checksums, release notes, and the Git history for auditability.
 
-## Current 0.1.4 status
+## Current 0.1.5 status
 
-Version 0.1.4 build 12 may be built and installed locally. Do not tag or publish it until the signing, notarization, protected-environment, legal-review, and clean-machine prerequisites above are actually available.
+Version 0.1.5 may be built locally and distributed as an **ad-hoc (non-notarized)** DMG/ZIP via `scripts/package-adhoc-release.sh` until Developer ID + notary credentials exist. Ad-hoc packages do not upload binaries to Apple notarization; Gatekeeper will warn strangers. Do not set `ENABLE_NOTARIZED_RELEASE=1` until the signing prerequisites above are ready.

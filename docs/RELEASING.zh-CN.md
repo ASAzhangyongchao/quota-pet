@@ -77,6 +77,6 @@ git push origin v0.1.3
 
 不要改写或删除已经发布的标签。若版本存在安全问题，应在 GitHub 明确标记、从 Homebrew tap 下架，并发布更高的补丁版本修正。用户可临时重装之前已验证的版本化产物。保留校验值、发布说明和 Git 历史，保证可审计。
 
-## 当前 0.1.4 状态
+## 当前 0.1.5 状态
 
-0.1.4 build 12 可以本机构建和安装。在签名、公证、受保护环境、法律复核和干净机器验收条件真正具备之前，不创建标签，也不发布公开安装包。
+0.1.5 可本机构建，并用 `scripts/package-adhoc-release.sh` 打出 **ad-hoc（非公证）** DMG/ZIP 做临时分发。临时包**不会**把安装包提交给 Apple 公证；陌生人下载会遇 Gatekeeper 提示。在 Developer ID 与公证密钥就绪前，**不要**设置 `ENABLE_NOTARIZED_RELEASE=1`。
