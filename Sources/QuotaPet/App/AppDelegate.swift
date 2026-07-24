@@ -189,7 +189,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     self?.preferCodexChannel(channel)
                 },
                 onRescan: { [weak self] in
-                    self?.refreshSettingsCandidates()
+                    self?.refreshSettingsCandidates(announceScan: true)
                 },
                 onPickTerminalCodex: { [weak self] in
                     self?.pickTerminalCodex()
@@ -241,9 +241,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         executableResolver = nil
     }
 
+    private var lastCodexScanMessage: String?
+
     private func showSettings() {
-        refreshSettingsCandidates()
-        settingsController?.value.show(candidates: resolveCandidates())
+        refreshSettingsCandidates(announceScan: false)
     }
 
     private func resolveCandidates() -> [ExecutableResolution] {
@@ -253,8 +254,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ) ?? []
     }
 
-    private func refreshSettingsCandidates() {
-        settingsController?.value.show(candidates: resolveCandidates())
+    private func refreshSettingsCandidates(announceScan: Bool) {
+        let candidates = resolveCandidates()
+        if announceScan {
+            lastCodexScanMessage = CodexChannelPresentation.scanSummary(
+                from: candidates,
+                preferredChannel: preferences?.preferredCodexChannel ?? .chatGPT,
+                language: preferences?.resolvedLanguage ?? .current
+            )
+        }
+        settingsController?.value.show(candidates: candidates, scanMessage: lastCodexScanMessage)
     }
 
     private func makeComposition(
@@ -281,7 +290,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         restartProvider(resolver: resolver)
-        refreshSettingsCandidates()
+        refreshSettingsCandidates(announceScan: false)
     }
 
     private func pickTerminalCodex() {
@@ -306,7 +315,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         restartProvider(resolver: resolver)
-        refreshSettingsCandidates()
+        lastCodexScanMessage = L10n.text(
+            .settingsCodexScanFoundTerminal,
+            language: preferences.resolvedLanguage
+        )
+        refreshSettingsCandidates(announceScan: false)
     }
 
     private func stopAndQuit() {

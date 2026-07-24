@@ -55,6 +55,34 @@ final class CodexChannelPresentationTests: XCTestCase {
         XCTAssertEqual(model.terminal.status, .pending)
         XCTAssertNil(model.activeChannel)
     }
+
+    func testScanSummaryExplainsOnlyChatGPTWhenTerminalMissing() {
+        let chatGPT = makeCandidate(
+            path: "/Applications/ChatGPT.app/Contents/Resources/codex",
+            source: .chatGPTBundle
+        )
+        let resolutions: [ExecutableResolution] = [
+            .accepted(chatGPT, trust: .bundleAllowList),
+            .rejected(.realpathFailed),
+        ]
+        let summary = CodexChannelPresentation.scanSummary(
+            from: resolutions,
+            preferredChannel: .chatGPT,
+            language: .simplifiedChinese
+        )
+        XCTAssertTrue(summary.contains("ChatGPT"))
+        XCTAssertTrue(summary.contains("没有独立终端") || summary.contains("扫描完成"))
+    }
+
+    func testScanSummaryReportsTerminalWhenFound() {
+        let brew = makeCandidate(path: "/opt/homebrew/bin/codex", source: .homebrew)
+        let summary = CodexChannelPresentation.scanSummary(
+            from: [.accepted(brew, trust: .confirmed)],
+            preferredChannel: .terminal,
+            language: .english
+        )
+        XCTAssertTrue(summary.lowercased().contains("terminal"))
+    }
 }
 
 private func makeCandidate(path: String, source: ExecutableCandidate.Source) -> ExecutableCandidate {

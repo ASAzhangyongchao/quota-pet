@@ -13,7 +13,8 @@ final class CodexExecutableResolverTests: XCTestCase {
         let inputs = CodexExecutableResolver.candidateInputs(
             userSelectedURL: userURL,
             path: path,
-            homeDirectory: homeURL
+            homeDirectory: homeURL,
+            loginPATHProvider: { nil }
         )
 
         XCTAssertEqual(inputs.first?.url, userURL)
@@ -26,7 +27,10 @@ final class CodexExecutableResolverTests: XCTestCase {
         ])
         XCTAssertEqual(inputs[5].url.path, "/opt/homebrew/bin/codex")
         XCTAssertEqual(inputs[6].url.path, "/usr/local/bin/codex")
-        XCTAssertEqual(inputs.filter { $0.source == .path }.count, 64)
+        XCTAssertEqual(inputs[7].url.path, "/Users/tester/.local/bin/codex")
+        // Fixed ~/.local/bin plus first 64 dirs from discovery PATH.
+        XCTAssertEqual(inputs.filter { $0.source == .path }.count, 65)
+        XCTAssertEqual(inputs[8].url.path, "/tools/0/codex")
     }
 
     func testInspectionDeduplicatesCanonicalPathsWithoutChangingPriority() {

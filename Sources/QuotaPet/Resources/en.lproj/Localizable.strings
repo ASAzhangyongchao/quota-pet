@@ -83,7 +83,7 @@
 "settings.codex_channel.terminal.title" = "Terminal Codex";
 "settings.codex_channel.chatgpt.missing" = "No Codex found inside the ChatGPT app.";
 "settings.codex_channel.terminal.missing" = "No terminal Codex found (Homebrew / PATH).";
-"settings.codex_channel.terminal.tip" = "Install a terminal Codex, or choose the local codex executable.";
+"settings.codex_channel.terminal.tip" = "A working `codex` command in Terminal often still points at ChatGPT’s binary. Install a separate terminal Codex then Rescan, or Choose file.";
 "settings.codex_use_this" = "Use this";
 "settings.codex_rescan" = "Rescan";
 "settings.codex_pick_file" = "Choose Codex file…";
@@ -91,6 +91,9 @@
 "settings.codex_status.pending" = "Needs confirmation";
 "settings.codex_status.ready" = "Ready";
 "settings.codex_status.active" = "In use";
+"settings.codex_scan.only_chatgpt" = "Scan finished: only ChatGPT’s bundled Codex was found — no separate terminal install.";
+"settings.codex_scan.found_terminal" = "Scan finished: a terminal Codex was found.";
+"settings.codex_scan.found_none" = "Scan finished: no usable Codex was found.";
 "settings.codex_trust.source.chatgpt" = "Bundled in ChatGPT app";
 "settings.codex_trust.source.codex_app" = "Bundled in Codex app";
 "settings.codex_trust.source.home_chatgpt" = "ChatGPT app in your home folder";

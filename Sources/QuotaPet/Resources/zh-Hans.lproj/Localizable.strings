@@ -83,7 +83,7 @@
 "settings.codex_channel.terminal.title" = "终端 Codex";
 "settings.codex_channel.chatgpt.missing" = "未检测到 ChatGPT 应用内的 Codex。";
 "settings.codex_channel.terminal.missing" = "未检测到终端 Codex（Homebrew / PATH）。";
-"settings.codex_channel.terminal.tip" = "可先安装终端 Codex，或点「选择文件」指定本机 codex 可执行文件。";
+"settings.codex_channel.terminal.tip" = "终端里能跑 `codex` 不代表有独立安装——很多时候命令仍指向 ChatGPT 那份。要独立终端版请安装后点「重新扫描」，或「选择文件」。";
 "settings.codex_use_this" = "使用这个";
 "settings.codex_rescan" = "重新扫描";
 "settings.codex_pick_file" = "选择 Codex 文件…";
@@ -91,6 +91,9 @@
 "settings.codex_status.pending" = "待确认";
 "settings.codex_status.ready" = "已就绪";
 "settings.codex_status.active" = "当前使用";
+"settings.codex_scan.only_chatgpt" = "扫描完成：只找到 ChatGPT 应用里的 Codex，没有独立终端安装。";
+"settings.codex_scan.found_terminal" = "扫描完成：已找到终端 Codex。";
+"settings.codex_scan.found_none" = "扫描完成：未找到可用的 Codex。";
 "settings.codex_trust.source.chatgpt" = "ChatGPT 应用自带";
 "settings.codex_trust.source.codex_app" = "Codex 应用自带";
 "settings.codex_trust.source.home_chatgpt" = "用户目录里的 ChatGPT 应用";

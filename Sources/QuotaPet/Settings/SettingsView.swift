@@ -12,11 +12,13 @@ final class SettingsWindowController: NSWindowController {
     private let onRegisterHotKey: () -> Void
     private let onSetLaunchAtLogin: (Bool) -> Void
     private var latestCandidates: [ExecutableResolution]
+    private var latestScanMessage: String?
     private var cancellables = Set<AnyCancellable>()
 
     init(
         preferences: Preferences,
         candidates: [ExecutableResolution],
+        scanMessage: String? = nil,
         onPreferChannel: @escaping (PreferredCodexChannel) -> Void,
         onRescan: @escaping () -> Void,
         onPickTerminalCodex: @escaping () -> Void,
@@ -30,9 +32,11 @@ final class SettingsWindowController: NSWindowController {
         self.onRegisterHotKey = onRegisterHotKey
         self.onSetLaunchAtLogin = onSetLaunchAtLogin
         latestCandidates = candidates
+        latestScanMessage = scanMessage
         let view = SettingsView(
             preferences: preferences,
             candidates: candidates,
+            scanMessage: scanMessage,
             onPreferChannel: onPreferChannel,
             onRescan: onRescan,
             onPickTerminalCodex: onPickTerminalCodex,
@@ -48,26 +52,30 @@ final class SettingsWindowController: NSWindowController {
         super.init(window: window)
         preferences.$languagePreference.sink { [weak self] _ in
             guard let self else { return }
-            self.reload(candidates: self.latestCandidates)
+            self.reload(candidates: self.latestCandidates, scanMessage: self.latestScanMessage)
         }.store(in: &cancellables)
     }
 
     required init?(coder: NSCoder) { nil }
 
-    func show(candidates: [ExecutableResolution]? = nil) {
+    func show(candidates: [ExecutableResolution]? = nil, scanMessage: String? = nil) {
         if let candidates {
-            reload(candidates: candidates)
+            reload(candidates: candidates, scanMessage: scanMessage)
+        } else if let scanMessage {
+            reload(candidates: latestCandidates, scanMessage: scanMessage)
         }
         window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
     }
 
-    private func reload(candidates: [ExecutableResolution]) {
+    private func reload(candidates: [ExecutableResolution], scanMessage: String?) {
         latestCandidates = candidates
+        latestScanMessage = scanMessage
         window?.title = L10n.text(.settingsTitle, language: preferences.resolvedLanguage)
         hosting.rootView = SettingsView(
             preferences: preferences,
             candidates: candidates,
+            scanMessage: scanMessage,
             onPreferChannel: onPreferChannel,
             onRescan: onRescan,
             onPickTerminalCodex: onPickTerminalCodex,
@@ -80,6 +88,7 @@ final class SettingsWindowController: NSWindowController {
 private struct SettingsView: View {
     @ObservedObject var preferences: Preferences
     let candidates: [ExecutableResolution]
+    let scanMessage: String?
     let onPreferChannel: (PreferredCodexChannel) -> Void
     let onRescan: () -> Void
     let onPickTerminalCodex: () -> Void
@@ -158,6 +167,7 @@ private struct SettingsView: View {
                         language: language,
                         preferredChannel: preferences.preferredCodexChannel,
                         candidates: candidates,
+                        scanMessage: scanMessage,
                         onPreferChannel: onPreferChannel,
                         onRescan: onRescan,
                         onPickTerminalCodex: onPickTerminalCodex
@@ -306,12 +316,28 @@ enum CodexChannelPresentation {
             rejectedCount: rejectedCount
         )
     }
+
+    static func scanSummary(
+        from resolutions: [ExecutableResolution],
+        preferredChannel: PreferredCodexChannel,
+        language: AppLanguage
+    ) -> String {
+        let model = model(from: resolutions, preferredChannel: preferredChannel)
+        if model.terminal.status != .missing {
+            return L10n.text(.settingsCodexScanFoundTerminal, language: language)
+        }
+        if model.chatGPT.status != .missing {
+            return L10n.text(.settingsCodexScanOnlyChatGPT, language: language)
+        }
+        return L10n.text(.settingsCodexScanFoundNone, language: language)
+    }
 }
 
 private struct CodexChannelSettingsSection: View {
     let language: AppLanguage
     let preferredChannel: PreferredCodexChannel
     let candidates: [ExecutableResolution]
+    let scanMessage: String?
     let onPreferChannel: (PreferredCodexChannel) -> Void
     let onRescan: () -> Void
     let onPickTerminalCodex: () -> Void
@@ -330,6 +356,13 @@ private struct CodexChannelSettingsSection: View {
             Text(summaryText)
                 .font(.body.weight(.semibold))
                 .fixedSize(horizontal: false, vertical: true)
+
+            if let scanMessage {
+                Text(scanMessage)
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
 
             CodexChannelCardView(
                 language: language,

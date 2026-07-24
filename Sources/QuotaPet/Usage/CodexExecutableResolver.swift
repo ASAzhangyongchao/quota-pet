@@ -333,7 +333,8 @@ final class CodexExecutableResolver {
     static func candidateInputs(
         userSelectedURL: URL? = nil,
         path: String? = ProcessInfo.processInfo.environment["PATH"],
-        homeDirectory: URL = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
+        homeDirectory: URL = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true),
+        loginPATHProvider: (() -> String?)? = nil
     ) -> [ExecutablePathInput] {
         var inputs: [ExecutablePathInput] = []
         if let userSelectedURL {
@@ -346,11 +347,22 @@ final class CodexExecutableResolver {
             .init(url: homeDirectory.appendingPathComponent("Applications/Codex.app/Contents/Resources/codex"), source: .homeCodexBundle),
             .init(url: URL(fileURLWithPath: "/opt/homebrew/bin/codex"), source: .homebrew),
             .init(url: URL(fileURLWithPath: "/usr/local/bin/codex"), source: .local),
+            .init(url: homeDirectory.appendingPathComponent(".local/bin/codex"), source: .path),
         ])
-        guard let path, path.utf8.count <= Self.maximumPathBytes else {
+        let discoveryPATH: String
+        if let loginPATHProvider {
+            discoveryPATH = CodexDiscoveryPATH.merged(
+                processPATH: path,
+                homeDirectory: homeDirectory,
+                loginPATHProvider: loginPATHProvider
+            )
+        } else {
+            discoveryPATH = CodexDiscoveryPATH.merged(processPATH: path, homeDirectory: homeDirectory)
+        }
+        guard discoveryPATH.utf8.count <= Self.maximumPathBytes else {
             return inputs
         }
-        inputs.append(contentsOf: path.split(separator: ":", omittingEmptySubsequences: true).prefix(Self.maximumPathEntries).compactMap { directory in
+        inputs.append(contentsOf: discoveryPATH.split(separator: ":", omittingEmptySubsequences: true).prefix(Self.maximumPathEntries).compactMap { directory in
             guard directory.utf8.count <= Self.maximumPathComponentBytes else { return nil }
             return ExecutablePathInput(
                 url: URL(fileURLWithPath: String(directory), isDirectory: true).appendingPathComponent("codex"),
@@ -370,7 +382,7 @@ final class CodexExecutableResolver {
     func inspect(_ inputs: [ExecutablePathInput]) -> [ExecutableResolution] {
         var results: [ExecutableResolution] = []
         var canonicalPaths = Set<String>()
-        for input in inputs.prefix(Self.maximumPathEntries + 7) {
+        for input in inputs.prefix(Self.maximumPathEntries + 8) {
             do {
                 let inspection = normalize(try inspector.inspect(url: input.url, source: input.source), input: input)
                 guard canonicalPaths.insert(inspection.candidate.canonicalURL.path).inserted else { continue }
