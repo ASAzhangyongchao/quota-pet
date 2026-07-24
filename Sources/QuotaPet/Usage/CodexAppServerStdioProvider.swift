@@ -161,17 +161,18 @@ final class CodexAppServerStdioProvider: UsageProvider {
     private let coordinator: UsageCoordinator
 
     init(
-        candidate: ExecutableCandidate,
+        candidates: [ExecutableCandidate],
         resolver: any UsageExecutableResolving,
         sessionFactory: any CodexAppServerSessionFactory,
         scheduler: any UsageScheduling = DispatchUsageScheduler(),
         requestTimeout: TimeInterval = 15
     ) {
+        precondition(!candidates.isEmpty, "CodexAppServerStdioProvider requires at least one candidate")
         var savedContinuation: AsyncStream<QuotaSnapshot>.Continuation?
         snapshots = AsyncStream { savedContinuation = $0 }
         continuation = savedContinuation!
         coordinator = UsageCoordinator(
-            candidate: candidate,
+            candidates: candidates,
             resolver: resolver,
             sessionFactory: sessionFactory,
             scheduler: scheduler,
@@ -181,6 +182,23 @@ final class CodexAppServerStdioProvider: UsageProvider {
         savedContinuation?.onTermination = { [weak coordinator] _ in
             Task { await coordinator?.stop() }
         }
+    }
+
+    /// Convenience for single-binary call sites / tests.
+    convenience init(
+        candidate: ExecutableCandidate,
+        resolver: any UsageExecutableResolving,
+        sessionFactory: any CodexAppServerSessionFactory,
+        scheduler: any UsageScheduling = DispatchUsageScheduler(),
+        requestTimeout: TimeInterval = 15
+    ) {
+        self.init(
+            candidates: [candidate],
+            resolver: resolver,
+            sessionFactory: sessionFactory,
+            scheduler: scheduler,
+            requestTimeout: requestTimeout
+        )
     }
 
     deinit {
@@ -209,7 +227,8 @@ private actor UsageCoordinator {
         let task: Task<Void, Never>
     }
 
-    private let candidate: ExecutableCandidate
+    private let candidates: [ExecutableCandidate]
+    private var candidateIndex = 0
     private let resolver: any UsageExecutableResolving
     private let sessionFactory: any CodexAppServerSessionFactory
     private let scheduler: any UsageScheduling
@@ -230,8 +249,12 @@ private actor UsageCoordinator {
     private var policy = RefreshPolicy()
     private var lastStandardError = Data()
 
-    init(candidate: ExecutableCandidate, resolver: any UsageExecutableResolving, sessionFactory: any CodexAppServerSessionFactory, scheduler: any UsageScheduling, requestTimeout: TimeInterval, publish: @escaping (QuotaSnapshot) -> Void) {
-        self.candidate = candidate
+    private var candidate: ExecutableCandidate {
+        candidates[candidateIndex]
+    }
+
+    init(candidates: [ExecutableCandidate], resolver: any UsageExecutableResolving, sessionFactory: any CodexAppServerSessionFactory, scheduler: any UsageScheduling, requestTimeout: TimeInterval, publish: @escaping (QuotaSnapshot) -> Void) {
+        self.candidates = candidates
         self.resolver = resolver
         self.sessionFactory = sessionFactory
         self.scheduler = scheduler
@@ -334,53 +357,80 @@ private actor UsageCoordinator {
         guard mode != nil, !connecting, connection == nil else { return }
         connecting = true
         lastStandardError.removeAll(keepingCapacity: true)
-        generation += 1
-        let currentGeneration = generation
-        guard resolver.revalidate(candidate) else {
-            connecting = false
-            publishState(.incompatible(L10n.text(.errorTrustValidation)))
-            scheduleRetry()
-            return
+
+        // Try current trusted binary first, then fail over (ChatGPT update → other confirmed paths).
+        let order = Array(candidateIndex..<candidates.count) + Array(0..<candidateIndex)
+        var lastError: Error?
+        for index in order {
+            candidateIndex = index
+            generation += 1
+            let currentGeneration = generation
+            let current = candidates[index]
+            guard resolver.revalidate(current) else {
+                lastError = nil
+                continue
+            }
+
+            do {
+                let session = try sessionFactory.start(
+                    executableURL: current.canonicalURL,
+                    arguments: ["app-server", "--stdio"],
+                    onStandardOutput: { [weak self] data in
+                        Task { await self?.receiveStandardOutput(data, generation: currentGeneration) }
+                    },
+                    onStandardError: { [weak self] data in
+                        Task { await self?.receiveStandardError(data, generation: currentGeneration) }
+                    },
+                    onExit: { [weak self] in
+                        Task { await self?.sessionExited(generation: currentGeneration) }
+                    }
+                )
+                let client = CodexRPCClient(
+                    send: { try session.write($0) },
+                    onRateLimitsUpdated: { [weak self] data in
+                        Task { await self?.receiveRateLimitUpdate(data, generation: currentGeneration) }
+                    },
+                    requestTimeout: requestTimeout
+                )
+                let newConnection = Connection(generation: currentGeneration, session: session, client: client)
+                connection = newConnection
+                connecting = false
+                handshaking = true
+                _ = try await client.request(method: "initialize", params: [
+                    "clientInfo": ["name": "quota_pet", "title": "QuotaPet", "version": "0.1.4"],
+                ])
+                guard connection?.generation == currentGeneration else { return }
+                try await client.sendInitialized(params: [:])
+                handshaking = false
+                reading = true
+                await readRateLimits(newConnection)
+                return
+            } catch {
+                lastError = error
+                handshaking = false
+                reading = false
+                if connection?.generation == currentGeneration {
+                    await closeConnection()
+                }
+            }
         }
 
-        do {
-            let session = try sessionFactory.start(
-                executableURL: candidate.canonicalURL,
-                arguments: ["app-server", "--stdio"],
-                onStandardOutput: { [weak self] data in
-                    Task { await self?.receiveStandardOutput(data, generation: currentGeneration) }
-                },
-                onStandardError: { [weak self] data in
-                    Task { await self?.receiveStandardError(data, generation: currentGeneration) }
-                },
-                onExit: { [weak self] in
-                    Task { await self?.sessionExited(generation: currentGeneration) }
-                }
-            )
-            let client = CodexRPCClient(
-                send: { try session.write($0) },
-                onRateLimitsUpdated: { [weak self] data in
-                    Task { await self?.receiveRateLimitUpdate(data, generation: currentGeneration) }
-                },
-                requestTimeout: requestTimeout
-            )
-            let newConnection = Connection(generation: currentGeneration, session: session, client: client)
-            connection = newConnection
-            connecting = false
-            handshaking = true
-            _ = try await client.request(method: "initialize", params: [
-                "clientInfo": ["name": "quota_pet", "title": "QuotaPet", "version": "0.1.4"],
-            ])
-            guard connection?.generation == currentGeneration else { return }
-            try await client.sendInitialized(params: [:])
-            handshaking = false
-            reading = true
-            await readRateLimits(newConnection)
-        } catch {
-            connecting = false
-            handshaking = false
-            await fail(error, generation: currentGeneration)
+        connecting = false
+        let allUntrusted = order.allSatisfy { !resolver.revalidate(candidates[$0]) }
+        if allUntrusted {
+            publishState(.incompatible(L10n.text(.errorTrustValidation)))
+        } else if let error = lastError as? CodexRPCClientError, error == .requestTimedOut {
+            publishState(.unavailable(L10n.text(.errorRequestTimedOut)))
+        } else {
+            publishState(.unavailable(L10n.text(.errorRequestFailed)))
         }
+        scheduleRetry()
+    }
+
+    /// Prefer the next binary after an unexpected App Server death (common during ChatGPT updates).
+    private func preferNextCandidateAfterExit() {
+        guard candidates.count > 1 else { return }
+        candidateIndex = (candidateIndex + 1) % candidates.count
     }
 
     private func readRateLimits(_ connection: Connection) async {
@@ -429,6 +479,7 @@ private actor UsageCoordinator {
         handshaking = false
         reading = false
         await exited.client.cancelPending()
+        preferNextCandidateAfterExit()
         publishState(.unavailable(L10n.text(.errorAppServerExited)))
         scheduleRetry()
     }

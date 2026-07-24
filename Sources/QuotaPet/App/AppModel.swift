@@ -164,32 +164,54 @@ protocol AppExecutableResolving: UsageExecutableResolving {
 
 extension CodexExecutableResolver: AppExecutableResolving {}
 
+enum TrustedCodexSelection {
+    /// Trusted Codex binaries in discovery order, optionally skipping recently failed paths
+    /// (e.g. ChatGPT.app mid-update) so another signed/confirmed binary can take over.
+    static func trustedCandidates(
+        from resolutions: [ExecutableResolution],
+        skippingPaths: Set<String> = []
+    ) -> [ExecutableCandidate] {
+        resolutions.compactMap { resolution -> ExecutableCandidate? in
+            guard case let .accepted(candidate, trust) = resolution,
+                  trust == .bundleAllowList || trust == .confirmed
+            else { return nil }
+            guard !skippingPaths.contains(candidate.canonicalURL.path) else { return nil }
+            return candidate
+        }
+    }
+}
+
 @MainActor
 final class AppComposition {
     let provider: any UsageProvider
     let model: AppModel
     let resolutions: [ExecutableResolution]
+    let trustedCandidates: [ExecutableCandidate]
     let pendingConfirmationCandidate: ExecutableCandidate?
 
     init(
         resolver: any AppExecutableResolving = CodexExecutableResolver(),
         sessionFactory: any CodexAppServerSessionFactory = FoundationCodexAppServerSessionFactory(),
-        store: any AppPreferenceStoring = UserDefaults.standard
+        store: any AppPreferenceStoring = UserDefaults.standard,
+        skippingPaths: Set<String> = []
     ) {
         let resolutions = resolver.resolve(userSelectedURL: nil, path: ProcessInfo.processInfo.environment["PATH"])
         self.resolutions = resolutions
+        let trusted = TrustedCodexSelection.trustedCandidates(from: resolutions, skippingPaths: skippingPaths)
+        // If skips wiped every option, fall back to the full trusted list rather than going offline.
+        trustedCandidates = trusted.isEmpty
+            ? TrustedCodexSelection.trustedCandidates(from: resolutions)
+            : trusted
         pendingConfirmationCandidate = resolutions.first(where: \.requiresConfirmation)?.candidate
-        let trustedCandidate = resolutions.compactMap { resolution -> ExecutableCandidate? in
-            guard case let .accepted(candidate, trust) = resolution,
-                  trust == .bundleAllowList || trust == .confirmed
-            else { return nil }
-            return candidate
-        }.first
 
-        if let trustedCandidate {
-            provider = CodexAppServerStdioProvider(candidate: trustedCandidate, resolver: resolver, sessionFactory: sessionFactory)
-        } else {
+        if trustedCandidates.isEmpty {
             provider = UnavailableUsageProvider(message: L10n.text(.errorNoTrustedCodex))
+        } else {
+            provider = CodexAppServerStdioProvider(
+                candidates: trustedCandidates,
+                resolver: resolver,
+                sessionFactory: sessionFactory
+            )
         }
         model = AppModel(provider: provider, store: store)
     }

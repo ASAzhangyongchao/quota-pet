@@ -28,13 +28,13 @@ struct LifecycleRecoveryPolicy {
 /// Decides when Codex trust / process death should rebuild AppComposition (e.g. after ChatGPT updates).
 struct ProviderHealthRecoveryPolicy: Equatable {
     static let minimumRestartInterval: TimeInterval = 30
-    static let appServerExitThreshold = 2
+    static let softFailureThreshold = 2
 
-    private(set) var consecutiveAppServerExits = 0
+    private(set) var consecutiveSoftFailures = 0
     private var lastRestartAt: Date?
 
     mutating func noteReady() {
-        consecutiveAppServerExits = 0
+        consecutiveSoftFailures = 0
     }
 
     /// Returns true when the host should call `restartProvider` (throttled).
@@ -50,6 +50,8 @@ struct ProviderHealthRecoveryPolicy: Equatable {
 
         let trustMessage = L10n.text(.errorTrustValidation, language: language)
         let exitedMessage = L10n.text(.errorAppServerExited, language: language)
+        let timedOutMessage = L10n.text(.errorRequestTimedOut, language: language)
+        let requestFailedMessage = L10n.text(.errorRequestFailed, language: language)
         let message: String?
         switch snapshot.state {
         case let .incompatible(value), let .unavailable(value), let .stale(value):
@@ -59,24 +61,27 @@ struct ProviderHealthRecoveryPolicy: Equatable {
         }
 
         let isTrustFailure = snapshot.state.isIncompatible || message == trustMessage
-        let isAppServerExit = message == exitedMessage
+        let isSoftFailure =
+            message == exitedMessage
+            || message == timedOutMessage
+            || message == requestFailedMessage
 
-        if isAppServerExit {
-            consecutiveAppServerExits += 1
+        if isSoftFailure {
+            consecutiveSoftFailures += 1
         } else if isTrustFailure {
-            consecutiveAppServerExits = 0
+            consecutiveSoftFailures = 0
         }
 
         let shouldAttempt =
             isTrustFailure
-            || (isAppServerExit && consecutiveAppServerExits >= Self.appServerExitThreshold)
+            || (isSoftFailure && consecutiveSoftFailures >= Self.softFailureThreshold)
 
         guard shouldAttempt else { return false }
         if let lastRestartAt, now.timeIntervalSince(lastRestartAt) < Self.minimumRestartInterval {
             return false
         }
         lastRestartAt = now
-        consecutiveAppServerExits = 0
+        consecutiveSoftFailures = 0
         return true
     }
 }
@@ -138,6 +143,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var recoveryGeneration: UInt64 = 0
     private var recoveryPolicy = LifecycleRecoveryPolicy()
     private var providerHealthPolicy = ProviderHealthRecoveryPolicy()
+    private var skippedCodexPaths: [String: Date] = [:]
+    private static let skippedCodexPathTTL: TimeInterval = 15 * 60
     private var isTerminating = false
     private var workspaceObservers: [NSObjectProtocol] = []
     private var networkMonitor: NWPathMonitor?
@@ -238,7 +245,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             await previous.model.stop()
             guard !Task.isCancelled, let preferences = self.preferences else { return }
             self.floatingPetController?.invalidate()
-            let replacement = AppComposition(resolver: resolver)
+            let replacement = AppComposition(
+                resolver: resolver,
+                skippingPaths: self.activeSkippedCodexPaths()
+            )
             let connectionOffer = self.makeConnectionOffer(
                 composition: replacement,
                 resolver: resolver,
@@ -251,6 +261,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.terminationCoordinator = self.makeTerminationCoordinator()
             if !self.isTerminating, !self.recoveryPolicy.isSleeping { await replacement.model.start() }
         }
+    }
+
+    private func activeSkippedCodexPaths(now: Date = .now) -> Set<String> {
+        skippedCodexPaths = skippedCodexPaths.filter {
+            now.timeIntervalSince($0.value) < Self.skippedCodexPathTTL
+        }
+        return Set(skippedCodexPaths.keys)
+    }
+
+    private func noteSkippedCodexPath(_ path: String, resolver: CodexExecutableResolver) {
+        let allTrusted = TrustedCodexSelection.trustedCandidates(from: resolver.resolve())
+        // Only demote a path when another trusted binary exists; otherwise keep retrying it.
+        guard allTrusted.contains(where: { $0.canonicalURL.path != path }) else { return }
+        skippedCodexPaths[path] = .now
     }
 
     private func makeConnectionOffer(
@@ -305,6 +329,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard !isTerminating, let resolver = executableResolver, let preferences else { return }
         let language = preferences.resolvedLanguage
         guard providerHealthPolicy.shouldRestartProvider(for: snapshot, language: language) else { return }
+        if let failedPath = composition?.trustedCandidates.first?.canonicalURL.path {
+            noteSkippedCodexPath(failedPath, resolver: resolver)
+        }
         restartProvider(resolver: resolver)
     }
 

@@ -52,6 +52,44 @@ final class LifecycleRecoveryPolicyTests: XCTestCase {
         XCTAssertTrue(policy.shouldRestartProvider(for: snapshot, language: language, now: now.addingTimeInterval(1)))
     }
 
+    func testProviderHealthRestartsAfterRepeatedTimeouts() {
+        var policy = ProviderHealthRecoveryPolicy()
+        let language = AppLanguage.english
+        let timedOut = L10n.text(.errorRequestTimedOut, language: language)
+        let now = Date(timeIntervalSince1970: 2_500)
+        let snapshot = QuotaSnapshot(planType: nil, windows: [], updatedAt: now, state: .unavailable(timedOut))
+
+        XCTAssertFalse(policy.shouldRestartProvider(for: snapshot, language: language, now: now))
+        XCTAssertTrue(policy.shouldRestartProvider(for: snapshot, language: language, now: now.addingTimeInterval(1)))
+    }
+
+    func testTrustedCodexSelectionSkipsFailedPathsWhenAlternativesExist() {
+        let chatGPT = makeTrustedCandidate(
+            path: "/Applications/ChatGPT.app/Contents/Resources/codex",
+            source: .chatGPTBundle
+        )
+        let brew = makeTrustedCandidate(
+            path: "/opt/homebrew/bin/codex",
+            source: .homebrew
+        )
+        let resolutions: [ExecutableResolution] = [
+            .accepted(chatGPT, trust: .bundleAllowList),
+            .accepted(brew, trust: .confirmed),
+        ]
+
+        let skipped = TrustedCodexSelection.trustedCandidates(
+            from: resolutions,
+            skippingPaths: [chatGPT.canonicalURL.path]
+        )
+        XCTAssertEqual(skipped.map(\.canonicalURL.path), [brew.canonicalURL.path])
+
+        let fallback = TrustedCodexSelection.trustedCandidates(from: resolutions, skippingPaths: [
+            chatGPT.canonicalURL.path,
+            brew.canonicalURL.path,
+        ])
+        XCTAssertTrue(fallback.isEmpty)
+    }
+
     func testProviderHealthResetsExitCountOnReady() {
         var policy = ProviderHealthRecoveryPolicy()
         let language = AppLanguage.english
@@ -129,4 +167,20 @@ private func eventuallyLifecycle(_ condition: @escaping () async -> Bool) async 
         await Task.yield()
     }
     XCTFail("lifecycle condition timed out")
+}
+
+private func makeTrustedCandidate(path: String, source: ExecutableCandidate.Source) -> ExecutableCandidate {
+    let url = URL(fileURLWithPath: path)
+    return ExecutableCandidate(
+        canonicalURL: url,
+        source: source,
+        ownerUID: 501,
+        mode: 0o755,
+        signingIdentifier: "com.openai.codex",
+        teamIdentifier: "2DC432GLL2",
+        codeHash: "abc",
+        deviceID: 1,
+        inode: 2,
+        inputURL: url
+    )
 }
