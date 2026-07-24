@@ -223,7 +223,7 @@ private struct HelpToggleRow: View {
                 Text(helpText)
                     .font(.callout)
                     .padding(12)
-                    .frame(maxWidth: 280, alignment: .leading)
+                    .frame(maxWidth: 320, alignment: .leading)
                     .fixedSize(horizontal: false, vertical: true)
             }
             .accessibilityLabel(helpText)
