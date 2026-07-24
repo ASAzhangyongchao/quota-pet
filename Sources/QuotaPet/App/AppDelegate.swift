@@ -181,7 +181,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             preferences: preferences,
             connectionOffer: connectionOffer
         )
-        settingsController = DeferredConstruction { [weak self, weak resolver] in
+        settingsController = DeferredConstruction { [weak self] in
             SettingsWindowController(
                 preferences: preferences,
                 candidates: self?.resolveCandidates() ?? [],
