@@ -165,18 +165,24 @@ protocol AppExecutableResolving: UsageExecutableResolving {
 extension CodexExecutableResolver: AppExecutableResolving {}
 
 enum TrustedCodexSelection {
-    /// Trusted Codex binaries in discovery order, optionally skipping recently failed paths
-    /// (e.g. ChatGPT.app mid-update) so another signed/confirmed binary can take over.
+    /// Trusted Codex binaries, optionally skipping recently failed paths and preferring a channel.
     static func trustedCandidates(
         from resolutions: [ExecutableResolution],
-        skippingPaths: Set<String> = []
+        skippingPaths: Set<String> = [],
+        preferredChannel: PreferredCodexChannel = .chatGPT
     ) -> [ExecutableCandidate] {
-        resolutions.compactMap { resolution -> ExecutableCandidate? in
+        let candidates = resolutions.compactMap { resolution -> ExecutableCandidate? in
             guard case let .accepted(candidate, trust) = resolution,
                   trust == .bundleAllowList || trust == .confirmed
             else { return nil }
             guard !skippingPaths.contains(candidate.canonicalURL.path) else { return nil }
             return candidate
+        }
+        return candidates.sorted { lhs, rhs in
+            let leftPreferred = PreferredCodexChannel.channel(for: lhs.source) == preferredChannel
+            let rightPreferred = PreferredCodexChannel.channel(for: rhs.source) == preferredChannel
+            if leftPreferred == rightPreferred { return false }
+            return leftPreferred && !rightPreferred
         }
     }
 }
@@ -188,21 +194,32 @@ final class AppComposition {
     let resolutions: [ExecutableResolution]
     let trustedCandidates: [ExecutableCandidate]
     let pendingConfirmationCandidate: ExecutableCandidate?
+    let activeChannel: PreferredCodexChannel?
 
     init(
         resolver: any AppExecutableResolving = CodexExecutableResolver(),
         sessionFactory: any CodexAppServerSessionFactory = FoundationCodexAppServerSessionFactory(),
         store: any AppPreferenceStoring = UserDefaults.standard,
-        skippingPaths: Set<String> = []
+        skippingPaths: Set<String> = [],
+        preferredChannel: PreferredCodexChannel = .chatGPT,
+        userSelectedURL: URL? = nil
     ) {
-        let resolutions = resolver.resolve(userSelectedURL: nil, path: ProcessInfo.processInfo.environment["PATH"])
+        let resolutions = resolver.resolve(
+            userSelectedURL: userSelectedURL,
+            path: ProcessInfo.processInfo.environment["PATH"]
+        )
         self.resolutions = resolutions
-        let trusted = TrustedCodexSelection.trustedCandidates(from: resolutions, skippingPaths: skippingPaths)
+        let trusted = TrustedCodexSelection.trustedCandidates(
+            from: resolutions,
+            skippingPaths: skippingPaths,
+            preferredChannel: preferredChannel
+        )
         // If skips wiped every option, fall back to the full trusted list rather than going offline.
         trustedCandidates = trusted.isEmpty
-            ? TrustedCodexSelection.trustedCandidates(from: resolutions)
+            ? TrustedCodexSelection.trustedCandidates(from: resolutions, preferredChannel: preferredChannel)
             : trusted
         pendingConfirmationCandidate = resolutions.first(where: \.requiresConfirmation)?.candidate
+        activeChannel = trustedCandidates.first.map { PreferredCodexChannel.channel(for: $0.source) }
 
         if trustedCandidates.isEmpty {
             provider = UnavailableUsageProvider(message: L10n.text(.errorNoTrustedCodex))

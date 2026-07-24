@@ -18,7 +18,7 @@ All notable changes follow Semantic Versioning.
 - Settings update check no longer shows “Checking…” both on the button and as a caption underneath.
 - Manual refresh no longer stays stuck on “Reconnecting…” forever when Codex never returns a fresh snapshot; it fails after a second timeout so the button can be pressed again.
 - When ChatGPT’s bundled Codex fails mid-update, QuotaPet now fails over across other trusted Codex binaries and temporarily demotes the broken path so reconnects don’t keep hammering the updating app.
-- Settings “Codex sources” now explains in plain language which binary is preferred (ChatGPT app vs terminal), what still needs confirmation, and folds PATH scan noise away by default.
+- Settings “Codex sources” is now two fixed cards (ChatGPT app vs terminal) with clear “in use” status plus Use / Rescan / Choose file actions.
 
 ## [0.1.4] - 2026-07-21
 

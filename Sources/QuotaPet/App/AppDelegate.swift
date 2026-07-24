@@ -156,9 +156,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             preferences?.confirmedFingerprints = fingerprints
         }
         self.executableResolver = resolver
-        let composition = AppComposition(resolver: resolver)
-        self.composition = composition
         self.preferences = preferences
+        let composition = makeComposition(resolver: resolver)
+        self.composition = composition
         let launchAtLogin = LaunchAtLogin()
         self.launchAtLogin = launchAtLogin
         preferences.setLaunchAtLoginState(enabled: launchAtLogin.isEnabled, errorMessage: nil)
@@ -182,13 +182,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             connectionOffer: connectionOffer
         )
         settingsController = DeferredConstruction { [weak self, weak resolver] in
-            SettingsWindowController(preferences: preferences, candidates: resolver?.resolve() ?? [], onConfirm: { [weak self, weak resolver] candidate in
-                guard let self, let resolver, resolver.confirm(candidate) else { return }
-                preferences.confirmedFingerprints.insert(TrustFingerprint(candidate: candidate))
-                self.restartProvider(resolver: resolver)
-            }, onRegisterHotKey: { [weak self] in self?.registerHotKey() }, onSetLaunchAtLogin: { [weak self] enabled in
-                self?.setLaunchAtLogin(enabled)
-            })
+            SettingsWindowController(
+                preferences: preferences,
+                candidates: self?.resolveCandidates() ?? [],
+                onPreferChannel: { [weak self] channel in
+                    self?.preferCodexChannel(channel)
+                },
+                onRescan: { [weak self] in
+                    self?.refreshSettingsCandidates()
+                },
+                onPickTerminalCodex: { [weak self] in
+                    self?.pickTerminalCodex()
+                },
+                onRegisterHotKey: { [weak self] in self?.registerHotKey() },
+                onSetLaunchAtLogin: { [weak self] enabled in
+                    self?.setLaunchAtLogin(enabled)
+                }
+            )
         }
         globalHotKey = GlobalHotKey { [weak self] in
             DispatchQueue.main.async { self?.floatingPetController?.showAndRecoverInteraction() }
@@ -232,8 +242,71 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func showSettings() {
-        let candidates = executableResolver?.resolve() ?? []
-        settingsController?.value.show(candidates: candidates)
+        refreshSettingsCandidates()
+        settingsController?.value.show(candidates: resolveCandidates())
+    }
+
+    private func resolveCandidates() -> [ExecutableResolution] {
+        executableResolver?.resolve(
+            userSelectedURL: preferences?.userSelectedCodexURL,
+            path: ProcessInfo.processInfo.environment["PATH"]
+        ) ?? []
+    }
+
+    private func refreshSettingsCandidates() {
+        settingsController?.value.show(candidates: resolveCandidates())
+    }
+
+    private func makeComposition(
+        resolver: CodexExecutableResolver,
+        skippingPaths: Set<String> = []
+    ) -> AppComposition {
+        AppComposition(
+            resolver: resolver,
+            skippingPaths: skippingPaths,
+            preferredChannel: preferences?.preferredCodexChannel ?? .chatGPT,
+            userSelectedURL: preferences?.userSelectedCodexURL
+        )
+    }
+
+    private func preferCodexChannel(_ channel: PreferredCodexChannel) {
+        guard let preferences, let resolver = executableResolver else { return }
+        preferences.preferredCodexChannel = channel
+        let resolutions = resolveCandidates()
+        let model = CodexChannelPresentation.model(from: resolutions, preferredChannel: channel)
+        let card = channel == .chatGPT ? model.chatGPT : model.terminal
+        if let candidate = card.candidate {
+            if resolver.confirm(candidate) {
+                preferences.confirmedFingerprints.insert(TrustFingerprint(candidate: candidate))
+            }
+        }
+        restartProvider(resolver: resolver)
+        refreshSettingsCandidates()
+    }
+
+    private func pickTerminalCodex() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.title = L10n.text(.settingsCodexPickFile, language: preferences?.resolvedLanguage ?? .current)
+        panel.prompt = L10n.text(.settingsCodexUseThis, language: preferences?.resolvedLanguage ?? .current)
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        guard let preferences, let resolver = executableResolver else { return }
+        preferences.userSelectedCodexPath = url.path
+        preferences.preferredCodexChannel = .terminal
+        let resolutions = resolveCandidates()
+        if let candidate = resolutions.compactMap(\.candidate).first(where: {
+            $0.canonicalURL.path == url.path || $0.inputURL.path == url.path
+        }) ?? resolutions.compactMap(\.candidate).first(where: {
+            PreferredCodexChannel.channel(for: $0.source) == .terminal
+        }) {
+            if resolver.confirm(candidate) {
+                preferences.confirmedFingerprints.insert(TrustFingerprint(candidate: candidate))
+            }
+        }
+        restartProvider(resolver: resolver)
+        refreshSettingsCandidates()
     }
 
     private func stopAndQuit() {
@@ -246,7 +319,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             await previous.model.stop()
             guard !Task.isCancelled, let preferences = self.preferences else { return }
             self.floatingPetController?.invalidate()
-            let replacement = AppComposition(
+            let replacement = self.makeComposition(
                 resolver: resolver,
                 skippingPaths: self.activeSkippedCodexPaths()
             )
@@ -272,7 +345,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func noteSkippedCodexPath(_ path: String, resolver: CodexExecutableResolver) {
-        let allTrusted = TrustedCodexSelection.trustedCandidates(from: resolver.resolve())
+        let allTrusted = TrustedCodexSelection.trustedCandidates(
+            from: resolveCandidates(),
+            preferredChannel: preferences?.preferredCodexChannel ?? .chatGPT
+        )
         // Only demote a path when another trusted binary exists; otherwise keep retrying it.
         guard allTrusted.contains(where: { $0.canonicalURL.path != path }) else { return }
         skippedCodexPaths[path] = .now

@@ -30,6 +30,20 @@ struct NormalizedScreenPosition: Codable, Equatable {
     }
 }
 
+enum PreferredCodexChannel: String, Codable, CaseIterable, Equatable {
+    case chatGPT
+    case terminal
+
+    static func channel(for source: ExecutableCandidate.Source) -> PreferredCodexChannel {
+        switch source {
+        case .chatGPTBundle, .codexBundle, .homeChatGPTBundle, .homeCodexBundle:
+            .chatGPT
+        case .homebrew, .local, .path, .userSelected:
+            .terminal
+        }
+    }
+}
+
 @MainActor
 final class Preferences: ObservableObject {
     private enum Key {
@@ -43,6 +57,8 @@ final class Preferences: ObservableObject {
         static let languagePreference = "QuotaPet.languagePreference"
         static let position = "QuotaPet.normalizedPosition"
         static let fingerprints = "QuotaPet.confirmedFingerprints"
+        static let preferredCodexChannel = "QuotaPet.preferredCodexChannel"
+        static let userSelectedCodexPath = "QuotaPet.userSelectedCodexPath"
     }
 
     private let store: any AppPreferenceStoring
@@ -62,9 +78,20 @@ final class Preferences: ObservableObject {
     }
     @Published var normalizedPosition: NormalizedScreenPosition? { didSet { persist(normalizedPosition, key: Key.position) } }
     @Published var confirmedFingerprints: Set<TrustFingerprint> { didSet { persist(confirmedFingerprints, key: Key.fingerprints) } }
+    @Published var preferredCodexChannel: PreferredCodexChannel {
+        didSet { store.set(preferredCodexChannel.rawValue, forKey: Key.preferredCodexChannel) }
+    }
+    @Published var userSelectedCodexPath: String? {
+        didSet { store.set(userSelectedCodexPath, forKey: Key.userSelectedCodexPath) }
+    }
 
     var resolvedLanguage: AppLanguage {
         AppLanguage.resolve(preference: languagePreference)
+    }
+
+    var userSelectedCodexURL: URL? {
+        guard let userSelectedCodexPath, !userSelectedCodexPath.isEmpty else { return nil }
+        return URL(fileURLWithPath: userSelectedCodexPath)
     }
 
     init(store: any AppPreferenceStoring = UserDefaults.standard) {
@@ -81,6 +108,10 @@ final class Preferences: ObservableObject {
         languagePreference = LanguagePreference(rawValue: store.object(forKey: Key.languagePreference) as? String ?? "") ?? .system
         normalizedPosition = Self.load(NormalizedScreenPosition.self, from: store, key: Key.position)
         confirmedFingerprints = Self.load(Set<TrustFingerprint>.self, from: store, key: Key.fingerprints) ?? []
+        preferredCodexChannel = PreferredCodexChannel(
+            rawValue: store.object(forKey: Key.preferredCodexChannel) as? String ?? ""
+        ) ?? .chatGPT
+        userSelectedCodexPath = store.object(forKey: Key.userSelectedCodexPath) as? String
     }
 
     func setHotKeyRegistration(_ result: Result<Void, GlobalHotKeyError>) {
