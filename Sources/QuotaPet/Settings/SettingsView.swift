@@ -5,6 +5,11 @@ import SwiftUI
 @MainActor
 final class SettingsWindowController: NSWindowController {
     private let hosting: NSHostingController<SettingsView>
+    private let preferences: Preferences
+    private let onConfirm: (ExecutableCandidate) -> Void
+    private let onRegisterHotKey: () -> Void
+    private let onSetLaunchAtLogin: (Bool) -> Void
+    private var latestCandidates: [ExecutableResolution]
     private var cancellables = Set<AnyCancellable>()
 
     init(
@@ -14,6 +19,11 @@ final class SettingsWindowController: NSWindowController {
         onRegisterHotKey: @escaping () -> Void,
         onSetLaunchAtLogin: @escaping (Bool) -> Void
     ) {
+        self.preferences = preferences
+        self.onConfirm = onConfirm
+        self.onRegisterHotKey = onRegisterHotKey
+        self.onSetLaunchAtLogin = onSetLaunchAtLogin
+        latestCandidates = candidates
         let view = SettingsView(
             preferences: preferences,
             candidates: candidates,
@@ -25,26 +35,35 @@ final class SettingsWindowController: NSWindowController {
         let window = NSWindow(contentViewController: hosting)
         window.title = L10n.text(.settingsTitle, language: preferences.resolvedLanguage)
         window.styleMask.insert(.resizable)
-        window.setContentSize(NSSize(width: 560, height: 560))
-        window.minSize = NSSize(width: 520, height: 360)
+        window.setContentSize(NSSize(width: 560, height: 620))
+        window.minSize = NSSize(width: 520, height: 400)
         super.init(window: window)
-        preferences.$languagePreference.sink { [weak self, weak preferences] _ in
-            guard let self, let preferences else { return }
-            self.window?.title = L10n.text(.settingsTitle, language: preferences.resolvedLanguage)
-            self.hosting.rootView = SettingsView(
-                preferences: preferences,
-                candidates: candidates,
-                onConfirm: onConfirm,
-                onRegisterHotKey: onRegisterHotKey,
-                onSetLaunchAtLogin: onSetLaunchAtLogin
-            )
+        preferences.$languagePreference.sink { [weak self] _ in
+            guard let self else { return }
+            self.reload(candidates: self.latestCandidates)
         }.store(in: &cancellables)
     }
 
     required init?(coder: NSCoder) { nil }
-    func show() {
+
+    func show(candidates: [ExecutableResolution]? = nil) {
+        if let candidates {
+            reload(candidates: candidates)
+        }
         window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private func reload(candidates: [ExecutableResolution]) {
+        latestCandidates = candidates
+        window?.title = L10n.text(.settingsTitle, language: preferences.resolvedLanguage)
+        hosting.rootView = SettingsView(
+            preferences: preferences,
+            candidates: candidates,
+            onConfirm: onConfirm,
+            onRegisterHotKey: onRegisterHotKey,
+            onSetLaunchAtLogin: onSetLaunchAtLogin
+        )
     }
 }
 
@@ -193,26 +212,76 @@ private struct HelpToggleRow: View {
 }
 
 enum CodexTrustListPresentation {
-    static let previewLimit = 3
+    enum Badge: Equatable {
+        case primary
+        case trustedBackup
+        case pending
+    }
 
-    /// Prefers actionable / trusted rows for the compact Settings preview.
-    static func preview(from candidates: [ExecutableResolution], limit: Int = previewLimit) -> [ExecutableResolution] {
-        guard candidates.count > limit else { return candidates }
-        var selected: [ExecutableResolution] = []
-        var used = Set<Int>()
+    struct AcceptedItem: Equatable {
+        let resolution: ExecutableResolution
+        let candidate: ExecutableCandidate
+        let badge: Badge
+    }
 
-        func take(where predicate: (ExecutableResolution) -> Bool) {
-            for (index, candidate) in candidates.enumerated() where !used.contains(index) && predicate(candidate) {
-                selected.append(candidate)
-                used.insert(index)
-                if selected.count == limit { return }
+    struct Model: Equatable {
+        let primary: AcceptedItem?
+        let alternatives: [AcceptedItem]
+        let rejectedCount: Int
+        let rejected: [ExecutableResolution]
+    }
+
+    static func model(from resolutions: [ExecutableResolution]) -> Model {
+        let trusted = TrustedCodexSelection.trustedCandidates(from: resolutions)
+        let primaryPath = trusted.first?.canonicalURL.path
+        var primary: AcceptedItem?
+        var alternatives: [AcceptedItem] = []
+        var rejected: [ExecutableResolution] = []
+
+        for resolution in resolutions {
+            switch resolution {
+            case let .accepted(candidate, trust):
+                let badge: Badge
+                if trust == .requiresConfirmation {
+                    badge = .pending
+                } else if candidate.canonicalURL.path == primaryPath, primary == nil {
+                    badge = .primary
+                } else {
+                    badge = .trustedBackup
+                }
+                let item = AcceptedItem(resolution: resolution, candidate: candidate, badge: badge)
+                if badge == .primary {
+                    primary = item
+                } else {
+                    alternatives.append(item)
+                }
+            case .rejected:
+                rejected.append(resolution)
             }
         }
 
-        take { $0.requiresConfirmation }
-        take { $0.candidate != nil }
-        take { _ in true }
-        return selected
+        return Model(primary: primary, alternatives: alternatives, rejectedCount: rejected.count, rejected: rejected)
+    }
+
+    static func sourceTitle(_ source: ExecutableCandidate.Source, language: AppLanguage) -> String {
+        switch source {
+        case .chatGPTBundle: L10n.text(.settingsCodexSourceChatGPT, language: language)
+        case .codexBundle: L10n.text(.settingsCodexSourceCodexApp, language: language)
+        case .homeChatGPTBundle: L10n.text(.settingsCodexSourceHomeChatGPT, language: language)
+        case .homeCodexBundle: L10n.text(.settingsCodexSourceHomeCodex, language: language)
+        case .homebrew: L10n.text(.settingsCodexSourceHomebrew, language: language)
+        case .local: L10n.text(.settingsCodexSourceLocal, language: language)
+        case .path: L10n.text(.settingsCodexSourcePath, language: language)
+        case .userSelected: L10n.text(.settingsCodexSourceUser, language: language)
+        }
+    }
+
+    static func badgeTitle(_ badge: Badge, language: AppLanguage) -> String {
+        switch badge {
+        case .primary: L10n.text(.settingsCodexBadgePrimary, language: language)
+        case .trustedBackup: L10n.text(.settingsCodexBadgeTrusted, language: language)
+        case .pending: L10n.text(.settingsCodexBadgePending, language: language)
+        }
     }
 }
 
@@ -221,21 +290,56 @@ private struct CodexTrustSettingsSection: View {
     let candidates: [ExecutableResolution]
     let onConfirm: (ExecutableCandidate) -> Void
     @State private var showingAll = false
+    @State private var showingNoise = false
 
-    private var preview: [ExecutableResolution] {
-        CodexTrustListPresentation.preview(from: candidates)
+    private var model: CodexTrustListPresentation.Model {
+        CodexTrustListPresentation.model(from: candidates)
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            ForEach(Array(preview.enumerated()), id: \.offset) { _, resolution in
-                CodexTrustResolutionRow(language: language, resolution: resolution, onConfirm: onConfirm)
+        VStack(alignment: .leading, spacing: 12) {
+            Text(L10n.text(.settingsCodexTrustHelp, language: language))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if let primary = model.primary {
+                Text(L10n.text(.settingsCodexTrustCurrent, language: language))
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                CodexTrustAcceptedRow(language: language, item: primary, onConfirm: onConfirm)
+            } else {
+                Text(L10n.text(.settingsCodexTrustNoneTrusted, language: language))
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
-            if candidates.count > CodexTrustListPresentation.previewLimit {
+            if !model.alternatives.isEmpty {
+                Text(L10n.text(.settingsCodexTrustAlternatives, language: language))
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                ForEach(Array(model.alternatives.enumerated()), id: \.offset) { _, item in
+                    CodexTrustAcceptedRow(language: language, item: item, onConfirm: onConfirm)
+                }
+            }
+
+            if model.rejectedCount > 0 {
+                Text(L10n.text(.settingsTrustIgnoredNoise, language: language, arguments: [model.rejectedCount]))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button(L10n.text(.settingsTrustShowNoise, language: language)) {
+                    showingNoise = true
+                }
+                .font(.caption)
+            }
+
+            if candidates.count > 4 {
                 Button(L10n.text(.settingsTrustMore, language: language, arguments: [candidates.count])) {
                     showingAll = true
                 }
+                .font(.caption)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -247,6 +351,13 @@ private struct CodexTrustSettingsSection: View {
                 onClose: { showingAll = false }
             )
         }
+        .sheet(isPresented: $showingNoise) {
+            CodexTrustNoiseSheet(
+                language: language,
+                rejected: model.rejected,
+                onClose: { showingNoise = false }
+            )
+        }
     }
 }
 
@@ -255,6 +366,10 @@ private struct CodexTrustAllCandidatesSheet: View {
     let candidates: [ExecutableResolution]
     let onConfirm: (ExecutableCandidate) -> Void
     let onClose: () -> Void
+
+    private var model: CodexTrustListPresentation.Model {
+        CodexTrustListPresentation.model(from: candidates)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -270,10 +385,22 @@ private struct CodexTrustAllCandidatesSheet: View {
             Divider()
 
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 12) {
-                    ForEach(Array(candidates.enumerated()), id: \.offset) { _, resolution in
-                        CodexTrustResolutionRow(language: language, resolution: resolution, onConfirm: onConfirm)
-                        Divider()
+                LazyVStack(alignment: .leading, spacing: 14) {
+                    if let primary = model.primary {
+                        sectionTitle(L10n.text(.settingsCodexTrustCurrent, language: language))
+                        CodexTrustAcceptedRow(language: language, item: primary, onConfirm: onConfirm)
+                    }
+                    if !model.alternatives.isEmpty {
+                        sectionTitle(L10n.text(.settingsCodexTrustAlternatives, language: language))
+                        ForEach(Array(model.alternatives.enumerated()), id: \.offset) { _, item in
+                            CodexTrustAcceptedRow(language: language, item: item, onConfirm: onConfirm)
+                        }
+                    }
+                    if !model.rejected.isEmpty {
+                        sectionTitle(L10n.text(.settingsTrustShowNoise, language: language))
+                        ForEach(Array(model.rejected.enumerated()), id: \.offset) { _, resolution in
+                            CodexTrustRejectedRow(language: language, resolution: resolution)
+                        }
                     }
                 }
                 .padding(16)
@@ -281,52 +408,128 @@ private struct CodexTrustAllCandidatesSheet: View {
         }
         .frame(minWidth: 480, idealWidth: 520, minHeight: 360, idealHeight: 480)
     }
+
+    private func sectionTitle(_ text: String) -> some View {
+        Text(text)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.secondary)
+    }
 }
 
-private struct CodexTrustResolutionRow: View {
+private struct CodexTrustNoiseSheet: View {
     let language: AppLanguage
-    let resolution: ExecutableResolution
-    let onConfirm: (ExecutableCandidate) -> Void
+    let rejected: [ExecutableResolution]
+    let onClose: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            if let candidate = resolution.candidate {
-                Text(candidate.inputURL.path)
-                    .font(.caption)
-                    .textSelection(.enabled)
+        VStack(spacing: 0) {
+            HStack {
+                Text(L10n.text(.settingsTrustShowNoise, language: language))
+                    .font(.headline)
+                Spacer()
+                Button(L10n.text(.settingsTrustClose, language: language), action: onClose)
+                    .keyboardShortcut(.cancelAction)
+            }
+            .padding(16)
+            Divider()
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 10) {
+                    ForEach(Array(rejected.enumerated()), id: \.offset) { _, resolution in
+                        CodexTrustRejectedRow(language: language, resolution: resolution)
+                    }
+                }
+                .padding(16)
+            }
+        }
+        .frame(minWidth: 420, idealWidth: 460, minHeight: 280, idealHeight: 360)
+    }
+}
+
+private struct CodexTrustAcceptedRow: View {
+    let language: AppLanguage
+    let item: CodexTrustListPresentation.AcceptedItem
+    let onConfirm: (ExecutableCandidate) -> Void
+    @State private var showDetails = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(CodexTrustListPresentation.sourceTitle(item.candidate.source, language: language))
+                    .font(.body.weight(.semibold))
+                Spacer(minLength: 8)
+                Text(CodexTrustListPresentation.badgeTitle(item.badge, language: language))
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(badgeColor)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(badgeColor.opacity(0.12), in: Capsule())
+            }
+
+            Text(item.candidate.canonicalURL.path)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if item.badge == .pending {
+                Text(L10n.text(.settingsReviewTrust, language: language))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+                Button(L10n.text(.settingsConfirmTrust, language: language)) {
+                    onConfirm(item.candidate)
+                }
+            }
+
+            DisclosureGroup(L10n.text(.settingsTrustShowDetails, language: language), isExpanded: $showDetails) {
                 Text(
                     L10n.text(
                         .settingsCandidateDetails,
                         language: language,
                         arguments: [
-                            candidate.ownerUID,
-                            String(candidate.mode, radix: 8),
-                            candidate.signingIdentifier ?? L10n.text(.settingsNone, language: language),
-                            candidate.teamIdentifier ?? L10n.text(.settingsNone, language: language),
-                            String(candidate.codeHash.prefix(12)),
+                            item.candidate.ownerUID,
+                            String(item.candidate.mode, radix: 8),
+                            item.candidate.signingIdentifier ?? L10n.text(.settingsNone, language: language),
+                            item.candidate.teamIdentifier ?? L10n.text(.settingsNone, language: language),
+                            String(item.candidate.codeHash.prefix(12)),
                         ]
                     )
                 )
                 .font(.caption2)
+                .foregroundStyle(.secondary)
+                .textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)
-                if resolution.requiresConfirmation {
-                    Text(L10n.text(.settingsReviewTrust, language: language))
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Button(L10n.text(.settingsConfirmTrust, language: language)) { onConfirm(candidate) }
-                } else {
-                    Text(L10n.text(.settingsTrusted, language: language)).font(.caption).foregroundStyle(.green)
-                }
-            } else if case let .rejected(error) = resolution {
-                Text(L10n.text(.settingsRejected, language: language, arguments: [error.localizedMessage(language: language)]))
-                    .font(.caption)
-                    .foregroundStyle(.red)
-                    .fixedSize(horizontal: false, vertical: true)
             }
+            .font(.caption2)
         }
+        .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(Color.primary.opacity(0.05))
+        )
+    }
+
+    private var badgeColor: Color {
+        switch item.badge {
+        case .primary: .green
+        case .trustedBackup: .blue
+        case .pending: .orange
+        }
+    }
+}
+
+private struct CodexTrustRejectedRow: View {
+    let language: AppLanguage
+    let resolution: ExecutableResolution
+
+    var body: some View {
+        if case let .rejected(error) = resolution {
+            Text(L10n.text(.settingsRejected, language: language, arguments: [error.localizedMessage(language: language)]))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 }
 

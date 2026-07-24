@@ -232,7 +232,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func showSettings() {
-        settingsController?.value.show()
+        let candidates = executableResolver?.resolve() ?? []
+        settingsController?.value.show(candidates: candidates)
     }
 
     private func stopAndQuit() {
